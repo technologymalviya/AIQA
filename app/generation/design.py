@@ -82,12 +82,40 @@ async def design_suite(
             provenance=Provenance.HEURISTIC,
         )
     caller = llm_complete or complete_json
-    user_payload = prompt_for(discovery.pages, requirements)
-    completion: LLMCompletion = await caller(settings, user_payload)
-    if not completion.ok or completion.payload is None:
+    authored: list[TestCase] = []
+    calls = 0
+    input_tokens = 0
+    output_tokens = 0
+    model = ""
+    last_reason = ""
+    covered: set[str] = set()
+    for page in discovery.pages:
+        if page.redirect_escape or page.challenge:
+            continue
+        ask = prompt_for([page], requirements, requirements_text)
+        completion, used = await _one_completion(caller, settings, ask)
+        calls += used
+        input_tokens += completion.input_tokens
+        output_tokens += completion.output_tokens
+        model = completion.model or model
+        if completion.payload is None:
+            last_reason = completion.error or "empty response"
+            continue
+        decision = validate_model_suite(completion.payload, [page], origin)
+        if decision.dropped:
+            questions.append("Dropped ungrounded model cases: " + "; ".join(decision.dropped))
+        if decision.unsafe or not decision.cases:
+            last_reason = decision.reason or completion.error or "model output failed validation"
+            continue
+        for case in decision.cases:
+            targets = {step.target for step in case.steps if step.action == "goto"}
+            if page.url in targets:
+                covered.add(page.url)
+        authored.extend(decision.cases)
+    if not authored:
         reason = (
             "Deterministic page-load smoke fallback: model output was not usable "
-            f"({completion.error or 'empty response'})."
+            f"({last_reason or 'empty response'})."
         )
         questions.append(reason)
         return GenerationResult(
@@ -96,45 +124,50 @@ async def design_suite(
             open_questions=questions,
             fallback_reason=reason,
             provenance=Provenance.HEURISTIC,
-            llm_calls=1,
-            input_tokens=completion.input_tokens,
-            output_tokens=completion.output_tokens,
-            model=completion.model or settings.llm_model,
+            llm_calls=calls,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            model=model or settings.llm_model,
             provider=settings.llm_base_url,
         )
-    decision = validate_model_suite(completion.payload, discovery.pages, origin)
-    if decision.unsafe or not decision.cases:
-        reason = (
-            "Deterministic page-load smoke fallback: "
-            + (decision.reason or "model output failed validation")
-            + "."
-        )
-        questions.append(reason)
-        return GenerationResult(
-            cases=heuristic,
-            requirements=requirements,
-            open_questions=questions,
-            fallback_reason=reason,
-            provenance=Provenance.HEURISTIC,
-            llm_calls=1,
-            input_tokens=completion.input_tokens,
-            output_tokens=completion.output_tokens,
-            model=completion.model or settings.llm_model,
-            provider=settings.llm_base_url,
-        )
-    if decision.dropped:
-        questions.append("Dropped ungrounded model cases: " + "; ".join(decision.dropped))
-    link_requirements(decision.cases, requirements, discovery.pages)
-    # Destructive requirements stay blocked even when the model returns a suite.
-    decision.cases.extend(case for case in heuristic if case.blocked_reason)
+    kept = [
+        case
+        for case in heuristic
+        if case.blocked_reason
+        or "runtime" in case.tags
+        or not any(step.action == "goto" and step.target in covered for step in case.steps)
+    ]
+    missed = sorted(
+        {
+            step.target
+            for case in kept
+            for step in case.steps
+            if step.action == "goto" and step.target not in covered
+        }
+    )
+    if missed:
+        questions.append("Page-load checks were kept for screens the model did not write: " + ", ".join(missed))
+    cases = authored + kept
+    link_requirements(cases, requirements, discovery.pages)
     return GenerationResult(
-        cases=decision.cases,
+        cases=cases,
         requirements=requirements,
         open_questions=questions,
         provenance=Provenance.LLM,
-        llm_calls=1,
-        input_tokens=completion.input_tokens,
-        output_tokens=completion.output_tokens,
-        model=completion.model or settings.llm_model,
+        llm_calls=calls,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        model=model or settings.llm_model,
         provider=settings.llm_base_url,
     )
+
+
+async def _one_completion(caller, settings: Settings, ask: str) -> tuple[LLMCompletion, int]:
+    """Ask once, and once more when the reply is not JSON."""
+    first: LLMCompletion = await caller(settings, ask)
+    if first.ok and first.payload is not None:
+        return first, 1
+    second: LLMCompletion = await caller(settings, ask + "\nReturn the JSON object only.")
+    second.input_tokens += first.input_tokens
+    second.output_tokens += first.output_tokens
+    return second, 2

@@ -139,7 +139,7 @@ def _ground_case(raw: _ModelCase, pages: dict[str, DiscoveredPage], origin: Orig
         if _blob_unsafe(step.target) or _blob_unsafe(step.expected):
             return None
         if action not in _ALLOWED:
-            return False
+            continue
         if action == "goto":
             try:
                 url = check_target(step.target, authorized=origin)
@@ -156,18 +156,27 @@ def _ground_case(raw: _ModelCase, pages: dict[str, DiscoveredPage], origin: Orig
             return False
         expected = normalize_label(step.expected, 300)
         if action == "assert_http_status":
-            if expected != "2xx":
-                return False
+            if expected not in {"2xx", "200", "201", "204"}:
+                continue
+            status = current.http_status
+            if status is None or not 200 <= status <= 299:
+                continue
+            expected = "2xx"
         elif action == "assert_title":
             if not current.title or expected != current.title:
-                return False
+                continue
         elif action == "assert_heading":
-            if expected not in current.headings:
-                return False
+            allowed = set(current.headings)
+            if current.primary_heading:
+                allowed.add(current.primary_heading)
+            if expected not in allowed:
+                continue
         elif action == "assert_text":
-            blob = " ".join([current.title, current.text_excerpt, *current.headings])
+            blob = " ".join(
+                [current.title, current.text_excerpt, current.primary_heading, *current.headings, *current.buttons]
+            )
             if not expected or expected not in blob:
-                return False
+                continue
         elif action == "assert_no_page_errors":
             expected = ""
         steps.append(

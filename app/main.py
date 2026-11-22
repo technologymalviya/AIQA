@@ -7,6 +7,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
@@ -18,8 +19,9 @@ from app import __version__
 from app.config import Settings, load_settings
 from app.demo import demo_redirect, empty_favicon, router as demo_router
 from app.models import RunRequest
-from app.orchestrator import execute_run
+from app.orchestrator import continue_run, execute_run, queue_continuation
 from app.security.paths import DEFECT_NAME_RE, EVIDENCE_FILES, require_case_id, safe_child
+from app.security.text import redact
 from app.security.url_policy import ScopeError, check_target
 from app.storage.runs import RunStore
 
@@ -141,13 +143,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         return RedirectResponse(url=f"/runs/{record['run_id']}", status_code=303)
 
+    @app.post("/runs/{run_id}/continue")
+    async def continue_from_form(run_id: str, request: Request):
+        form = await request.form()
+        text = str(form.get("requirements_text") or "")
+        try:
+            record = queue_continuation(app.state.store, run_id, text)
+        except FileNotFoundError:
+            return HTMLResponse("Run not found", status_code=404)
+        except ValueError as exc:
+            return RedirectResponse(url=f"/runs/{run_id}?error={quote(_safe_error(exc))}", status_code=303)
+        except RuntimeError as exc:
+            if "still running" in str(exc):
+                return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
+            return RedirectResponse(url=f"/runs/{run_id}?error={quote(_safe_error(exc))}", status_code=303)
+        asyncio.create_task(continue_run(app.state.store, record["run_id"], app.state.settings))
+        return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
+
     @app.get("/runs/{run_id}", response_class=HTMLResponse)
-    def run_page(request: Request, run_id: str):
+    def run_page(request: Request, run_id: str, error: str = ""):
         try:
             run = app.state.store.load(run_id)
         except (FileNotFoundError, ValueError):
             return HTMLResponse("Run not found", status_code=404)
-        pages, results = _optional_json(app.state.store, run_id)
+        pages, results, cases = _optional_json(app.state.store, run_id)
         evidence = []
         for item in results:
             if item.get("verdict") not in {"FAIL", "INCONCLUSIVE"}:
@@ -183,10 +202,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             {
                 "run": run,
                 "pages": pages,
+                "cases": cases,
                 "results": results,
                 "evidence": evidence,
                 "artefacts": present,
                 "defects": defects,
+                "error": redact(error, 300),
             },
         )
         response.headers["Cache-Control"] = "no-store"
@@ -233,7 +254,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except (FileNotFoundError, ValueError):
             return _error(404, "not_found", "Run not found")
         rows = []
-        for row in app.state.store.events(run_id)[-80:]:
+        # The whole log is returned so the numbers stay with the lines that produced them.
+        for row in app.state.store.events(run_id):
             rows.append(
                 {
                     "ts": row.get("ts", ""),
@@ -375,9 +397,10 @@ def _public_run(record: dict) -> dict:
     }
 
 
-def _optional_json(store: RunStore, run_id: str) -> tuple[list, list]:
+def _optional_json(store: RunStore, run_id: str) -> tuple[list, list, list]:
     pages: list = []
     results: list = []
+    cases: list = []
     try:
         discovery = json.loads(store.read_artefact(run_id, "discovery.json").read_text(encoding="utf-8"))
         pages = discovery.get("pages") or []
@@ -388,7 +411,12 @@ def _optional_json(store: RunStore, run_id: str) -> tuple[list, list]:
         results = payload.get("results") or []
     except (FileNotFoundError, ValueError, json.JSONDecodeError):
         results = []
-    return pages, results
+    try:
+        payload = json.loads(store.read_artefact(run_id, "test-cases.json").read_text(encoding="utf-8"))
+        cases = payload if isinstance(payload, list) else []
+    except (FileNotFoundError, ValueError, json.JSONDecodeError):
+        cases = []
+    return pages, results, cases
 
 
 def _activity_caption(row: dict) -> str:
@@ -401,9 +429,9 @@ def _activity_caption(row: dict) -> str:
     if kind == "tool":
         return f"Finished opening screens ({detail.get('pages', 0)})"
     if kind == "design":
-        return str(detail.get("note") or "Planned the checks")[:180]
+        return str(detail.get("note") or "Planned the checks")[:300]
     if kind == "mind":
-        return str(detail.get("note") or "Decided the next step")[:180]
+        return str(detail.get("note") or "Decided the next step")[:300]
     if kind == "verdict":
         return f"{detail.get('verdict', '')} {detail.get('test_case_id', '')}".strip()
     if kind == "completed":

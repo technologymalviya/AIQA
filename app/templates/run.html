@@ -16,6 +16,9 @@
     <a href="/">All runs</a>
   </header>
   <main>
+    {% if error %}
+    <p class="error">{{ error }}</p>
+    {% endif %}
     {% if run.error %}
     <p class="error">{{ run.error }}</p>
     {% endif %}
@@ -36,6 +39,18 @@
       <p class="meta">This picture updates while the run is in progress. A refresh does not drop the result.</p>
       {% endif %}
     </section>
+    {% if run.status in ["completed", "failed", "cancelled"] %}
+    <form class="card" method="post" action="/runs/{{ run.run_id }}/continue">
+      <h2>Continue this session</h2>
+      <p class="meta">Testing on this run is done. Give another prompt and it continues here: the same site, the same account, and the same log. It will not delete, pay, or send messages.</p>
+      {% if run.request.requirements_text %}
+      <p class="meta">Last prompt: {{ run.request.requirements_text[:240] }}</p>
+      {% endif %}
+      <label for="next_prompt">Prompt</label>
+      <textarea id="next_prompt" name="requirements_text" maxlength="20000" required placeholder="Check the delivery boy flow after sign in"></textarea>
+      <p><button type="submit">Continue</button></p>
+    </form>
+    {% endif %}
     {% if pages %}
     <section class="card">
       <h2>Discovered pages</h2>
@@ -48,6 +63,26 @@
           <td>{{ page.http_status if page.http_status is not none else page.load_error }}</td>
           <td>{{ page.title }}</td>
           <td>{{ (page.console_errors + page.page_errors) | length }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </section>
+    {% endif %}
+    {% if cases %}
+    <section class="card">
+      <h2>Test cases</h2>
+      <p class="meta">{{ cases|length }} generated.</p>
+      <table>
+        <thead><tr><th>Id</th><th>Title</th><th>What the model understood</th><th>Steps</th><th>Provenance</th></tr></thead>
+        <tbody>
+        {% for item in cases %}
+        <tr>
+          <td>{{ item.test_case_id }}</td>
+          <td>{{ item.title }}</td>
+          <td>{{ item.summary }}</td>
+          <td>{{ item.steps|length }}</td>
+          <td>{{ item.provenance }}</td>
         </tr>
         {% endfor %}
         </tbody>
@@ -112,6 +147,6 @@
     </section>
     {% endif %}
   </main>
-  <script src="/static/dashboard.js"></script>
+  <script src="/static/dashboard.js?v=2"></script>
 </body>
 </html>

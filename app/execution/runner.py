@@ -159,7 +159,7 @@ async def execute_case(
             steps.append(outcome)
             mark = "passed" if outcome.passed else "failed"
             await capture(page, on_screen, f"{case.title}: {step.action} {mark}")
-            if not outcome.passed:
+            if not outcome.passed and outcome.kind != "assertion":
                 break
         verdict, classification, kind, reason = judge(
             steps,
@@ -285,12 +285,12 @@ async def _dispatch(page, step, origin: Origin, allowed_urls: set[str], state: d
             body = await page.locator("body").inner_text(timeout=step.timeout_ms)
         except PlaywrightTimeoutError:
             body = ""
-        actual = normalize_label(body, 1200)
+        visible = normalize_label(body, 8000)
         return StepResult(
             action=action,
-            passed=bool(expected) and expected in actual,
+            passed=bool(expected) and expected in visible,
             expected=expected,
-            actual=actual[:300],
+            actual=visible[:300],
             kind="assertion",
         )
     if action == "assert_no_page_errors":

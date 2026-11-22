@@ -6,7 +6,9 @@ from app.config import Settings
 from app.discovery.challenge import challenge_reason
 from app.generation.design import design_suite
 from app.generation.heuristic import cases_for_page
-from app.generation.llm import LLMCompletion
+from app.generation.llm import LLMCompletion, extract_json
+from app.generation.validator import validate_model_suite
+from app.security.url_policy import origin_of
 from app.models import DiscoveredPage, Discovery, Provenance
 from app.reporting.writer import write_cases, write_cost
 from app.models import CostLedger
@@ -206,6 +208,89 @@ def test_hugging_face_token_is_the_planner_without_an_openai_key(tmp_path: Path)
     assert "hf_exampletoken12345678" not in result.fallback_reason
     assert result.provenance is Provenance.LLM
     assert result.model == "meta-llama/Llama-3.3-70B-Instruct"
+
+
+def test_the_model_writes_one_case_for_each_screen(tmp_path: Path):
+    pricing = DiscoveredPage(
+        url="http://127.0.0.1:9/demo/pricing",
+        final_url="http://127.0.0.1:9/demo/pricing",
+        http_status=200,
+        title="Pricing",
+        headings=["Plans"],
+        primary_heading="Plans",
+        text_excerpt="Plans for the harbor",
+        buttons=["Start"],
+    )
+    discovery = _discovery()
+    discovery.pages.append(pricing)
+    seen: list[str] = []
+
+    async def fake(_settings, payload: str):
+        seen.append(payload)
+        screen = json.loads(payload)["screens"][0]
+        steps = [
+            {"action": "goto", "target": screen["url"], "expected": ""},
+            {"action": "assert_http_status", "target": "", "expected": "200"},
+            {"action": "assert_title", "target": "", "expected": screen["title"]},
+        ]
+        if screen["primary_heading"]:
+            steps.append({"action": "assert_heading", "target": "", "expected": screen["primary_heading"]})
+        return LLMCompletion(
+            ok=True,
+            payload={"cases": [{"title": screen["title"], "summary": f"{screen['title']} is this screen.", "steps": steps}]},
+            model="test-model",
+        )
+
+    result = asyncio.run(
+        design_suite(
+            discovery,
+            mode="hybrid",
+            requirements_text="test end to end",
+            settings=_settings(tmp_path, "unit-test-key"),
+            llm_complete=fake,
+        )
+    )
+    assert len(seen) == 2
+    assert "test end to end" in seen[0]
+    assert result.provenance is Provenance.LLM
+    assert result.fallback_reason == ""
+    assert [case.title for case in result.cases] == ["Home", "Pricing"]
+    assert all(case.provenance is Provenance.LLM for case in result.cases)
+    status = next(step for step in result.cases[1].steps if step.action == "assert_http_status")
+    assert status.expected == "2xx"
+
+
+def test_a_cut_off_reply_keeps_the_finished_case():
+    text = (
+        'Here is the JSON:\n```json\n{"cases":['
+        '{"title":"Home","summary":"Home screen","steps":[{"action":"goto","target":"http://127.0.0.1:9/demo/","expected":""}]}'
+        ', {"title":"Cut"'
+    )
+    parsed = extract_json(text)
+    assert [item["title"] for item in parsed["cases"]] == ["Home"]
+
+
+def test_a_wrong_heading_does_not_drop_the_rest_of_the_case():
+    page = _discovery().pages[0]
+    payload = {
+        "cases": [
+            {
+                "title": "Home",
+                "summary": "The welcome screen.",
+                "steps": [
+                    {"action": "goto", "target": page.url, "expected": ""},
+                    {"action": "assert_http_status", "target": "", "expected": "200"},
+                    {"action": "assert_title", "target": "", "expected": "Home"},
+                    {"action": "assert_heading", "target": "", "expected": "Not on the page"},
+                    {"action": "click", "target": "Buy", "expected": ""},
+                ],
+            }
+        ]
+    }
+    decision = validate_model_suite(payload, [page], origin_of(page.url))
+    assert decision.unsafe is False
+    assert [step.action for step in decision.cases[0].steps] == ["goto", "assert_http_status", "assert_title"]
+    assert decision.cases[0].steps[1].expected == "2xx"
 
 
 def test_missing_key_uses_heuristic(tmp_path: Path):

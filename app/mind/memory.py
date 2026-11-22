@@ -44,9 +44,13 @@ def save_memory(runs_dir: Path, memory: dict) -> None:
 
 
 def scrub(text: str, memory: dict) -> str:
-    secret = str(memory.get("password") or "")
-    if secret and secret in text:
-        text = text.replace(secret, "[redacted]")
+    secrets = [str(memory.get("password") or "")]
+    for item in memory.get("created_logins") or []:
+        if isinstance(item, dict):
+            secrets.append(str(item.get("password") or ""))
+    for secret in secrets:
+        if secret and secret in text:
+            text = text.replace(secret, "[redacted]")
     return text
 
 
@@ -59,4 +63,5 @@ def _empty(origin: str) -> dict:
         "signin_done": False,
         "entered_url": "",
         "nav_checked": [],
+        "created_logins": [],
     }
