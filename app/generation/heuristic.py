@@ -135,7 +135,7 @@ def blocked_requirement_case(requirement: Requirement) -> TestCase:
     return TestCase(
         test_case_id=case_id(requirement.requirement_id, "blocked"),
         title=f"{requirement.requirement_id} is not automated",
-        summary=requirement.text[:500],
+        summary="This requirement was not automated because it asks for a destructive or payment action.",
         priority="P2",
         risk="high",
         feature=requirement.requirement_id,

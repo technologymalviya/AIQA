@@ -69,7 +69,7 @@ def pricing() -> HTMLResponse:
     body = """
     <h1>Pricing</h1>
     <p role="alert">Prices unavailable</p>
-    <p>The catalog request failed. This page is the runtime-error fixture.</p>
+    <p data-qa-bug="pricing catalog failed to load">The catalog request failed. This page is the runtime-error fixture.</p>
     """
     # Safety boundary: this script is the known product bug. It is not model output.
     script = """

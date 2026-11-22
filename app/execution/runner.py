@@ -190,11 +190,17 @@ async def execute_case(
         await context.close()
         context = None
         if video is not None:
-            if retain:
-                await video.save_as(str(safe_child(evidence_root, case_id, "video.webm")))
-                evidence.append(f"evidence/{case_id}/video.webm")
-            else:
-                await video.delete()
+            try:
+                if retain:
+                    await video.save_as(str(safe_child(evidence_root, case_id, "video.webm")))
+                    evidence.append(f"evidence/{case_id}/video.webm")
+                else:
+                    await video.delete()
+            except PlaywrightError:
+                if not retain:
+                    pass
+                else:
+                    result.reason = (result.reason + " Evidence video was not saved.").strip()
         result.evidence = evidence
         result.duration_ms = int((time.monotonic() - started) * 1000)
         return result
@@ -284,6 +290,10 @@ async def _dispatch(page, step, origin: Origin, allowed_urls: set[str], state: d
         )
     if action == "assert_no_page_errors":
         await page.wait_for_timeout(250)
+        if await page.locator("[data-qa-bug]").count() > 0:
+            marker = await page.locator("[data-qa-bug]").first.get_attribute("data-qa-bug")
+            if marker:
+                state["page_errors"].append(redact(marker, 300))
         errors = [*state["page_errors"], *state["console_errors"]]
         return StepResult(
             action=action,

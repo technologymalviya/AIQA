@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Run {{ run.run_id }}</title>
+  <link rel="stylesheet" href="/static/dashboard.css">
+  <link rel="icon" href="data:,">
+</head>
+<body data-poll="1" data-status="{{ run.status }}">
+  <header class="top">
+    <div>
+      <h1>Run {{ run.run_id }}</h1>
+      <p class="meta">{{ run.status }} · {{ run.phase }} · {{ run.request.mode }}</p>
+    </div>
+    <a href="/">All runs</a>
+  </header>
+  <main>
+    {% if run.error %}
+    <p class="error">{{ run.error }}</p>
+    {% endif %}
+    <section class="card">
+      <p>Target {{ run.request.target_url }}</p>
+      {% if run.status in ["queued", "running"] %}
+      <form method="post" action="/api/v1/runs/{{ run.run_id }}/cancel">
+        <button type="submit">Cancel</button>
+      </form>
+      <p class="meta">This page reloads until the run finishes. A refresh does not drop the result.</p>
+      {% endif %}
+    </section>
+    {% if pages %}
+    <section class="card">
+      <h2>Discovered pages</h2>
+      <table>
+        <thead><tr><th>URL</th><th>Status</th><th>Title</th><th>Errors</th></tr></thead>
+        <tbody>
+        {% for page in pages %}
+        <tr>
+          <td>{{ page.url }}</td>
+          <td>{{ page.http_status if page.http_status is not none else page.load_error }}</td>
+          <td>{{ page.title }}</td>
+          <td>{{ (page.console_errors + page.page_errors) | length }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </section>
+    {% endif %}
+    {% if results %}
+    <section class="card">
+      <h2>Results</h2>
+      <p class="meta">Classification does not change the verdict.</p>
+      <table>
+        <thead><tr><th>Case</th><th>Verdict</th><th>Class</th><th>Kind</th><th>Provenance</th></tr></thead>
+        <tbody>
+        {% for item in results %}
+        <tr>
+          <td>{{ item.title }}</td>
+          <td class="{{ item.verdict }}">{{ item.verdict }}</td>
+          <td>{{ item.classification }}</td>
+          <td>{{ item.failure_kind }}</td>
+          <td>{{ item.provenance }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </section>
+    {% endif %}
+    {% if evidence %}
+    <section class="card">
+      <h2>Failure evidence</h2>
+      {% for item in evidence %}
+      <h3>{{ item.case_id }}</h3>
+      {% if item.video %}
+      <video controls src="{{ item.video }}"></video>
+      {% endif %}
+      {% if item.screenshot %}
+      <p><img class="shot" alt="Failure screenshot" src="{{ item.screenshot }}"></p>
+      {% endif %}
+      {% if item.trace %}
+      <p><a href="{{ item.trace }}">Download trace</a></p>
+      {% endif %}
+      {% endfor %}
+    </section>
+    {% endif %}
+    {% if defects %}
+    <section class="card">
+      <h2>Defect drafts</h2>
+      <ul>
+      {% for name in defects %}
+        <li><a href="/api/v1/runs/{{ run.run_id }}/defects/{{ name }}">{{ name }}</a></li>
+      {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+    {% if artefacts %}
+    <section class="card">
+      <h2>Reports</h2>
+      <ul>
+      {% for name in artefacts %}
+        <li><a href="/api/v1/runs/{{ run.run_id }}/artefacts/{{ name }}">{{ name }}</a></li>
+      {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+  </main>
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>

@@ -54,7 +54,9 @@ async def design_suite(
         heuristic.extend(cases_for_page(page, settings.action_timeout_ms))
     for requirement in requirements:
         if requirement.destructive:
-            heuristic.append(blocked_requirement_case(requirement))
+            blocked = blocked_requirement_case(requirement)
+            requirement.linked_case_ids.append(blocked.test_case_id)
+            heuristic.append(blocked)
             questions.append(
                 f"{requirement.requirement_id} asks for an action Phase 0 will not run. "
                 "The case is BLOCKED."

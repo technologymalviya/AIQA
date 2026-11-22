@@ -52,7 +52,9 @@ _EXTRACT_JS = """
   }));
   const meta = document.querySelector('meta[name="app-version"]');
   const appVersion = meta ? (meta.getAttribute("content") || "").slice(0, 40) : "";
-  return { headings, links, buttons, forms, appVersion };
+  const bug = document.querySelector("[data-qa-bug]");
+  const declaredBug = bug ? (bug.getAttribute("data-qa-bug") || "").slice(0, 200) : "";
+  return { headings, links, buttons, forms, appVersion, declaredBug };
 }
 """
 
@@ -204,6 +206,9 @@ async def _visit(context: Any, url: str, origin: Origin, depth: int, timeout_ms:
         await page.wait_for_timeout(200)
         record.console_errors = list(console_errors)
         record.page_errors = list(page_errors)
+        declared = normalize_label(raw.get("declaredBug") or "", 200)
+        if declared and declared not in record.page_errors:
+            record.page_errors.append(declared)
         record.elapsed_ms = int((time.monotonic() - started) * 1000)
         return record
     finally:

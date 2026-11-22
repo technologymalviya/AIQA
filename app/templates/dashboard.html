@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Autonomous QA Orchestrator</title>
+  <link rel="stylesheet" href="/static/dashboard.css">
+  <link rel="icon" href="data:,">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <h1>Autonomous QA Orchestrator</h1>
+      <p class="meta">Phase 0 pilot. Chromium only. No LLM key is required for the demo.</p>
+    </div>
+    <a href="/demo/">Open the demo app</a>
+  </header>
+  <main>
+    {% if error %}
+    <p class="error">{{ error }}</p>
+    {% endif %}
+    <form class="card" method="post" action="/runs">
+      <h2>New run</h2>
+      <label for="target_url">Target URL</label>
+      <input id="target_url" name="target_url" type="url" required value="http://127.0.0.1:8000/demo/" maxlength="2000">
+      <div class="row">
+        <label><input type="radio" name="mode" value="auto" checked> Auto</label>
+        <label><input type="radio" name="mode" value="hybrid"> Hybrid</label>
+      </div>
+      <label for="requirements_text">Requirements (hybrid)</label>
+      <textarea id="requirements_text" name="requirements_text" maxlength="20000" placeholder="REQ-1: The Help Centre page explains shipping."></textarea>
+      <label for="max_pages">Max pages</label>
+      <input id="max_pages" name="max_pages" type="number" min="1" max="25" value="8">
+      <label>
+        <input type="checkbox" name="authorization_confirmed" value="true" required>
+        I am authorized to test this environment. Discovery stays read-only and on this origin.
+      </label>
+      <p><button type="submit">Start run</button></p>
+    </form>
+    <section class="card">
+      <h2>Recent runs</h2>
+      {% if not runs %}
+      <p class="meta">No runs yet.</p>
+      {% else %}
+      <table>
+        <thead><tr><th>Run</th><th>Status</th><th>Target</th><th>Started</th></tr></thead>
+        <tbody>
+        {% for run in runs %}
+        <tr>
+          <td><a href="/runs/{{ run.run_id }}">{{ run.run_id }}</a></td>
+          <td class="{{ run.status }}">{{ run.status }}</td>
+          <td>{{ run.request.target_url }}</td>
+          <td>{{ run.created_at }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </section>
+    <p class="meta">Android, iOS, TV, Postgres, Redis, Jira, and GitHub publishing are NOT_IMPLEMENTED in this phase.</p>
+  </main>
+</body>
+</html>
