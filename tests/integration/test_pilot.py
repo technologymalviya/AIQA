@@ -258,6 +258,36 @@ def test_dashboard_form_starts_a_visible_run(pilot):
         assert image.content.startswith(b"\x89PNG")
 
 
+def test_signup_is_not_repeated(pilot):
+    base = pilot["base"]
+    with httpx.Client(timeout=60) as client:
+        first = _post(client, base, f"{base}/demo/")
+        second = _post(client, base, f"{base}/demo/")
+    assert first["status"] == "completed", first
+    assert second["status"] == "completed", second
+    second_notes = _notes(pilot["runs"] / second["run_id"])
+    created = 0
+    for path in pilot["runs"].glob("*/events.jsonl"):
+        created += sum("Creating one account" in note for note in _notes(path.parent))
+    assert created == 1
+    assert not any("Creating one account" in note for note in second_notes)
+    assert any("remembered" in note.lower() or "signed in" in note.lower() for note in second_notes)
+    saved = (pilot["runs"] / second["run_id"] / "results.json").read_text(encoding="utf-8")
+    assert "s3cret-token-value" not in saved
+
+
+def _notes(run_dir: Path) -> list[str]:
+    notes = []
+    for line in (run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        detail = row.get("detail") or {}
+        if isinstance(detail, dict):
+            notes.append(str(detail.get("note") or detail.get("caption") or ""))
+    return notes
+
+
 def _assert_media(run_dir: Path, results: list[dict]) -> None:
     for item in results:
         evidence = run_dir / "evidence" / item["test_case_id"]

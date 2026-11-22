@@ -12,6 +12,10 @@ from app.config import Settings
 from app.discovery.crawler import crawl
 from app.execution.runner import execute_case, launch_browser
 from app.generation.design import design_suite
+from app.mind.advisor import advise, apply_advice, choose_nav
+from app.mind.journey import run_journey
+from app.mind.memory import load_memory, save_memory, scrub
+from app.mind.plan import decide
 from app.models import CaseResult, CostLedger, TestCase, Verdict
 from app.reporting.writer import (
     measured_bytes,
@@ -68,17 +72,25 @@ async def _execute(store: RunStore, run_id: str, settings: Settings, llm_complet
         write_discovery(run_dir, discovery)
         store.event(run_id, "tool", {"name": "crawl", "pages": len(discovery.pages)})
         store.update(run_id, phase="design")
+        memory = load_memory(settings.runs_dir, origin.origin)
+        decision = decide(discovery.pages, memory)
+        payload, _source = await advise(settings, discovery.pages, memory)
+        decision = apply_advice(decision, payload, memory)
+        mind_note = decision.summary
+        if decision.mind.startswith("huggingface"):
+            used = decision.mind.split(":", 1)[-1]
+            mind_note = f"Hugging Face {used}: {decision.summary}"
+        store.event(run_id, "mind", {"note": redact(scrub(mind_note, memory), 300)})
+        focused = discovery.model_copy(update={"pages": decision.unique_pages or discovery.pages})
         generated = await design_suite(
-            discovery,
+            focused,
             mode=request["mode"],
             requirements_text=request.get("requirements_text", ""),
             settings=settings,
             llm_complete=llm_complete,
         )
         generated.open_questions.extend(discovery.coverage_notes)
-        generated.open_questions.append(
-            "Signed-in screens stay closed. This run does not log in, submit a form, or send a message."
-        )
+        generated.open_questions.append(decision.summary)
         for page in discovery.pages:
             if page.redirect_escape:
                 generated.open_questions.append(
@@ -94,11 +106,32 @@ async def _execute(store: RunStore, run_id: str, settings: Settings, llm_complet
         )
         environment = _environment(settings, request["target_url"], discovery)
         store.update(run_id, phase="execute")
+
+        def _note(message: str) -> None:
+            store.event(run_id, "mind", {"note": redact(scrub(message, memory), 180)})
+
+        journey_results, handled, memory = await run_journey(
+            browser,
+            decision=decision,
+            memory=memory,
+            settings=settings,
+            environment=environment,
+            on_screen=publish,
+            on_note=_note,
+            cancel_check=lambda: store.cancelled(run_id),
+            choose_nav=(lambda labels, checked: choose_nav(settings, labels, checked))
+            if settings.hf_token or settings.hf_local
+            else None,
+        )
+        save_memory(settings.runs_dir, memory)
         allowed = {page.url for page in discovery.pages if not page.redirect_escape}
         evidence_root = run_dir / "evidence"
-        results: list[CaseResult] = []
+        results: list[CaseResult] = list(journey_results)
         deadline = started + settings.run_timeout_s
         for case in generated.cases:
+            targets = {step.target for step in case.steps if step.action == "goto"}
+            if targets and targets <= handled:
+                continue
             if store.cancelled(run_id):
                 results.append(_stopped(case, "cancelled before execution", environment))
                 continue

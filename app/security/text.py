@@ -11,7 +11,9 @@ _SECRET = re.compile(
     r"(?i)(bearer\s+[a-z0-9\-_~\+/]+=*"
     r"|\b(?:api[_-]?key|secret|token|password)\b\s*[:=]\s*\S+"
     r"|\bsk-[A-Za-z0-9]{8,}\b"
-    r"|\bQA_LLM_API_KEY=\S+)"
+    r"|\bhf_[A-Za-z0-9]{8,}\b"
+    r"|\bQA_LLM_API_KEY=\S+"
+    r"|\b(?:QA_HF_TOKEN|HF_TOKEN)=\S+)"
 )
 
 

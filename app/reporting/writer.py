@@ -70,7 +70,8 @@ def write_understanding(root: Path, discovery: Discovery, mode: str) -> None:
         f"- Origin: {markdown_text(discovery.origin)}",
         f"- Pages visited: {len(discovery.pages)}",
         "",
-        "Discovery is read-only. Input values are not collected.",
+        "The crawl reads each screen and does not collect typed-in values. "
+        "When the app has a signup screen, one later step creates a single test account and reuses it.",
         "",
         "## Pages",
         "",

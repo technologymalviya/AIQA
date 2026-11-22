@@ -20,9 +20,10 @@ def test_case_id_and_path_escape():
 
 
 def test_redaction_and_encoding():
-    leaked = redact("Authorization bearer abc.def and sk-abcdefghi123")
+    leaked = redact("Authorization bearer abc.def and sk-abcdefghi123 hf_exampletoken12345678")
     assert "abc.def" not in leaked
     assert "sk-abcdefghi123" not in leaked
+    assert "hf_exampletoken12345678" not in leaked
     encoded = markdown_text("hello <script>alert(1)</script>\x00\u202ehidden")
     assert "<script>" not in encoded
     assert "\x00" not in encoded

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 router = APIRouter(prefix="/demo")
+_ACCOUNTS: dict[str, str] = {}
 
 _PAGE = """<!DOCTYPE html>
 <html lang="en">
@@ -34,6 +35,8 @@ _PAGE = """<!DOCTYPE html>
       <a href="/demo/">Home</a>
       <a href="/demo/pricing">Pricing</a>
       <a href="/demo/help">Help Centre</a>
+      <a href="/demo/signup">Create account</a>
+      <a href="/demo/login">Sign in</a>
       <a href="https://example.com/outside">External docs</a>
     </nav>
   </header>
@@ -124,6 +127,101 @@ def redirect_internal() -> RedirectResponse:
 @router.get("/fixtures/redirect-external")
 def redirect_external() -> RedirectResponse:
     return RedirectResponse(url="https://example.com/", status_code=302)
+
+
+def _account_form(title: str, heading: str, body: str, error: str = "") -> HTMLResponse:
+    alert = f'<p class="auth-error" role="alert">{error}</p>' if error else ""
+    return HTMLResponse(_page(title, f"<h1>{heading}</h1>{alert}{body}"))
+
+
+@router.get("/signup")
+def signup_form() -> HTMLResponse:
+    body = """
+    <form class="auth-form signup-form" method="post" action="/demo/signup">
+      <label>Admin name <input name="name" placeholder="Your name" required></label>
+      <label>Username <input name="username" placeholder="Login username" required></label>
+      <label>Password <input type="password" name="password" placeholder="At least 8 characters" required></label>
+      <label>Confirm Password <input type="password" name="confirm" placeholder="Re-enter password" required></label>
+      <label>Company name <input name="company" placeholder="Your dairy's name" required></label>
+      <label>Email <input name="email" placeholder="Email" required></label>
+      <label>Phone <input name="phone" placeholder="10-digit mobile" required></label>
+      <label for="signup-privacy"><input id="signup-privacy" type="checkbox"> I agree to the Privacy Policy</label>
+      <button class="auth-submit" type="submit">Sign Up</button>
+    </form>
+    """
+    return _account_form("Create account", "Create Account", body)
+
+
+@router.post("/signup")
+async def signup_submit(request: Request):
+    form = await request.form()
+    username = str(form.get("username") or "").strip()
+    password = str(form.get("password") or "")
+    if len(username) < 3 or len(password) < 8:
+        return _account_form("Create account", "Create Account", "", "Enter the account fields.")
+    if username in _ACCOUNTS:
+        return _account_form("Create account", "Create Account", "", "That username is already registered.")
+    _ACCOUNTS[username] = password
+    response = RedirectResponse(url="/demo/app", status_code=303)
+    response.set_cookie("demo_user", username, httponly=True)
+    return response
+
+
+@router.get("/login")
+def login_form() -> HTMLResponse:
+    body = """
+    <form class="auth-form" method="post" action="/demo/login">
+      <label>Username <input name="username" placeholder="Enter username" required></label>
+      <label>Password <input type="password" name="password" placeholder="Enter password" required></label>
+      <button class="auth-submit" type="submit">Continue</button>
+    </form>
+    """
+    return _account_form("Sign in", "Sign in", body)
+
+
+@router.post("/login")
+async def login_submit(request: Request):
+    form = await request.form()
+    username = str(form.get("username") or "").strip()
+    password = str(form.get("password") or "")
+    if _ACCOUNTS.get(username) != password:
+        body = """
+        <form class="auth-form" method="post" action="/demo/login">
+          <label>Username <input name="username" placeholder="Enter username" required></label>
+          <label>Password <input type="password" name="password" placeholder="Enter password" required></label>
+          <button class="auth-submit" type="submit">Continue</button>
+        </form>
+        """
+        return _account_form("Sign in", "Sign in", body, "Invalid credentials")
+    response = RedirectResponse(url="/demo/app", status_code=303)
+    response.set_cookie("demo_user", username, httponly=True)
+    return response
+
+
+@router.get("/app")
+def app_desk(request: Request) -> HTMLResponse:
+    user = request.cookies.get("demo_user", "")
+    if not user or user not in _ACCOUNTS:
+        return RedirectResponse(url="/demo/login", status_code=303)
+    body = f"""
+    <h1>Dairy desk</h1>
+    <p>Signed in as {user}</p>
+    <nav>
+      <button type="button">Customer</button>
+      <button type="button">Billing</button>
+      <button type="button">Raise Ticket</button>
+    </nav>
+    <p id="desk">Customer book</p>
+    <script>
+      document.querySelectorAll("nav button").forEach(function (button) {{
+        button.addEventListener("click", function () {{
+          var desk = document.getElementById("desk");
+          if (desk) desk.textContent = button.textContent;
+        }});
+      }});
+    </script>
+    """
+    return HTMLResponse(_page("Dairy desk", body))
 
 
 @router.get("/{rest:path}")

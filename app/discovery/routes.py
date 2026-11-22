@@ -9,6 +9,12 @@ from __future__ import annotations
 
 import re
 
+# Paths joined with || are aliases of one screen. Visit the shortest one.
+_CHAIN = re.compile(
+    r"""(?:[A-Za-z0-9_.]*===?\s*[`'"]/(?:[a-z][a-z0-9-]{1,40}(?:/[a-z][a-z0-9-]{1,40}){0,3})[`'"]\s*\|\|\s*){1,6}"""
+    r"""[A-Za-z0-9_.]*===?\s*[`'"]/(?:[a-z][a-z0-9-]{1,40}(?:/[a-z][a-z0-9-]{1,40}){0,3})[`'"]"""
+)
+_PATH = re.compile(r"""[`'"](/(?:[a-z][a-z0-9-]{1,40})(?:/[a-z][a-z0-9-]{1,40}){0,3})[`'"]""")
 # A path is accepted only when the script compares it or passes it to pushState.
 _NAV = re.compile(
     r"""(?:pushState\([^)\n]{0,180}?|[!=]==)\s*[`'"]"""
@@ -51,4 +57,17 @@ def routes_from_script(source: str) -> tuple[list[str], list[str]]:
             skip.append(path)
             continue
         keep.append(path)
+    drop = _alias_paths(text)
+    keep = [path for path in keep if path not in drop]
     return keep, skip
+
+
+def _alias_paths(source: str) -> set[str]:
+    drop: set[str] = set()
+    for chain in _CHAIN.findall(source):
+        paths = _PATH.findall(chain)
+        if len(paths) < 2:
+            continue
+        keep = min(paths, key=len)
+        drop.update(path for path in paths if path != keep)
+    return drop

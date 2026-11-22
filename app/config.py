@@ -18,6 +18,15 @@ def _int_env(name: str, default: int, *, low: int, high: int) -> int:
     return max(low, min(high, value))
 
 
+def _load_dotenv() -> None:
+    """Load .env when present. Values already in the environment win."""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
+
+
 def _bool_env(name: str, default: bool = False) -> bool:
     raw = os.environ.get(name, "").strip().lower()
     if not raw:
@@ -37,6 +46,10 @@ class Settings:
     llm_model: str
     browser_channel: str | None
     retain_pass_media: bool
+    hf_token: str | None = None
+    hf_model: str = "meta-llama/Llama-3.1-8B-Instruct"
+    hf_base_url: str = "https://router.huggingface.co/v1"
+    hf_local: bool = False
 
     def public_dict(self) -> dict[str, object]:
         """Settings safe to write into a run record. The API key is omitted."""
@@ -51,15 +64,21 @@ class Settings:
             "llm_configured": bool(self.llm_api_key),
             "browser_channel": self.browser_channel or "bundled-chromium",
             "retain_pass_media": self.retain_pass_media,
+            "hf_model": self.hf_model,
+            "hf_configured": bool(self.hf_token or self.hf_local),
         }
 
 
 def load_settings() -> Settings:
+    _load_dotenv()
     runs = os.environ.get("QA_RUNS_DIR", "runs").strip() or "runs"
     channel = os.environ.get("QA_BROWSER_CHANNEL", "").strip() or None
     key = os.environ.get("QA_LLM_API_KEY", "").strip() or None
     base = os.environ.get("QA_LLM_BASE_URL", "https://api.openai.com/v1").strip()
     model = os.environ.get("QA_LLM_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+    hf_token = os.environ.get("QA_HF_TOKEN", "").strip() or os.environ.get("HF_TOKEN", "").strip() or None
+    hf_model = os.environ.get("QA_HF_MODEL", "meta-llama/Llama-3.1-8B-Instruct").strip() or "meta-llama/Llama-3.1-8B-Instruct"
+    hf_base = os.environ.get("QA_HF_BASE_URL", "https://router.huggingface.co/v1").strip()
     return Settings(
         runs_dir=Path(runs),
         navigation_timeout_ms=_int_env("QA_NAVIGATION_TIMEOUT_MS", 6000, low=500, high=60000),
@@ -71,4 +90,8 @@ def load_settings() -> Settings:
         llm_model=model,
         browser_channel=channel,
         retain_pass_media=_bool_env("QA_RETAIN_PASS_MEDIA", False),
+        hf_token=hf_token,
+        hf_model=hf_model,
+        hf_base_url=hf_base.rstrip("/"),
+        hf_local=_bool_env("QA_HF_LOCAL", False),
     )
