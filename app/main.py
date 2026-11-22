@@ -408,9 +408,9 @@ def _activity_caption(row: dict) -> str:
     if kind == "tool":
         return f"Finished opening screens ({detail.get('pages', 0)})"
     if kind == "design":
-        return str(detail.get("note") or "Planned the checks")[:180]
+        return str(detail.get("note") or "Planned the checks")[:300]
     if kind == "mind":
-        return str(detail.get("note") or "Decided the next step")[:180]
+        return str(detail.get("note") or "Decided the next step")[:300]
     if kind == "verdict":
         return f"{detail.get('verdict', '')} {detail.get('test_case_id', '')}".strip()
     if kind == "completed":

@@ -59,12 +59,13 @@
       <h2>Test cases</h2>
       <p class="meta">{{ cases|length }} generated.</p>
       <table>
-        <thead><tr><th>Id</th><th>Title</th><th>Steps</th><th>Provenance</th></tr></thead>
+        <thead><tr><th>Id</th><th>Title</th><th>What the model understood</th><th>Steps</th><th>Provenance</th></tr></thead>
         <tbody>
         {% for item in cases %}
         <tr>
           <td>{{ item.test_case_id }}</td>
           <td>{{ item.title }}</td>
+          <td>{{ item.summary }}</td>
           <td>{{ item.steps|length }}</td>
           <td>{{ item.provenance }}</td>
         </tr>

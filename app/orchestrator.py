@@ -102,14 +102,28 @@ async def _execute(store: RunStore, run_id: str, settings: Settings, llm_complet
                 generated.open_questions.append(
                     f"{page.url} redirected outside the authorized origin. Body text was discarded."
                 )
-        planner = generated.fallback_reason or (
-            f"{generated.model or settings.llm_model} planned {len(generated.cases)} checks"
-        )
+        if generated.provenance.value == "llm":
+            planner = (
+                f"{generated.model or settings.llm_model} wrote {len(generated.cases)} test cases "
+                "from the crawled screens."
+            )
+        else:
+            planner = generated.fallback_reason or (
+                f"{generated.model or settings.llm_model} planned {len(generated.cases)} checks"
+            )
         store.event(
             run_id,
             "design",
             {"provenance": generated.provenance.value, "cases": len(generated.cases), "note": planner[:300]},
         )
+        for case in generated.cases:
+            if case.blocked_reason:
+                continue
+            store.event(
+                run_id,
+                "mind",
+                {"note": redact(scrub(f"Test case {case.test_case_id}: {case.title}. {case.summary}", memory), 300)},
+            )
         environment = _environment(settings, request["target_url"], discovery)
         store.update(run_id, phase="execute")
 
