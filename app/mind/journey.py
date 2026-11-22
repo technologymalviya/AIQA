@@ -68,7 +68,7 @@ async def run_journey(
     steps: list[StepResult] = []
     try:
         kwargs = {"viewport": {"width": 1280, "height": 720}, "locale": "en-GB", "timezone_id": "UTC"}
-        if state_path.is_file() and memory.get("signin_done"):
+        if state_path.is_file() and memory.get("signin_done") and not decision.create_account:
             kwargs["storage_state"] = str(state_path)
         context = await browser.new_context(**kwargs)
         context.set_default_navigation_timeout(settings.navigation_timeout_ms)
@@ -76,7 +76,7 @@ async def run_journey(
         if cancel_check and cancel_check():
             return [], handled, memory
         signed_in = False
-        if memory.get("signin_done") and memory.get("entered_url"):
+        if memory.get("signin_done") and memory.get("entered_url") and not decision.create_account:
             await _goto(page, memory["entered_url"], origin)
             await capture(page, on_screen, "Opening the remembered screen")
             signed_in = await _shell(page)
@@ -84,6 +84,7 @@ async def run_journey(
                 on_note("Already signed in from the remembered session.")
                 steps.append(StepResult(action="signin", passed=True, actual="remembered session"))
         if not signed_in and decision.create_account:
+            memory["nav_checked"] = []
             on_note("Creating one account.")
             account = _new_account()
             outcome = await _signup(page, decision.signup_url, origin, account, settings)
@@ -202,8 +203,19 @@ async def _signin(page, url: str, memory: dict, settings: Settings) -> StepResul
     try:
         await _goto(page, url, memory.get("origin") or "")
         await _dismiss_banner(page)
+        try:
+            await page.wait_for_selector(
+                "form input:not([type=checkbox]):not([type=hidden])",
+                timeout=5000,
+            )
+        except PlaywrightTimeoutError:
+            if await _shell(page) or await _has_session(page):
+                return StepResult(action="signin", passed=True, actual=str(memory.get("username") or ""))
+            return StepResult(action="signin", passed=False, error="sign-in form fields were not found", kind="runner")
         values = {"username": memory.get("username") or "", "password": memory.get("password") or ""}
         if not await _fill_form(page, values):
+            if await _shell(page) or await _has_session(page):
+                return StepResult(action="signin", passed=True, actual=str(memory.get("username") or ""))
             return StepResult(action="signin", passed=False, error="sign-in form fields were not found", kind="runner")
         await _submit(page, settings.navigation_timeout_ms)
         error = await _form_error(page)
@@ -304,6 +316,14 @@ async def _fill_form(page, values: dict[str, str]) -> bool:
             break
     if filled < len(values):
         filled += await _fill_placeholders(page, values)
+    if "password" in values and filled < len(values):
+        field = page.locator("form input[type=password]").first
+        try:
+            if await field.count() and not await field.input_value():
+                await field.fill(values["password"])
+                filled += 1
+        except PlaywrightError:
+            pass
     return filled >= len(values)
 
 

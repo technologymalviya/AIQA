@@ -1,6 +1,6 @@
 from app.mind.advisor import apply_advice
 from app.mind.memory import scrub
-from app.mind.plan import decide, goal_allows_account, pages_for_focus, role_of, unique_pages
+from app.mind.plan import decide, goal_allows_account, goal_wants_fresh_account, pages_for_focus, role_of, unique_pages
 from app.models import DiscoveredPage
 
 
@@ -99,6 +99,32 @@ def test_a_public_prompt_does_not_open_an_account():
     assert updated.sign_in is False
     assert updated.mind == "built-in"
     assert "buy a policy" not in updated.summary
+
+
+def test_create_new_user_does_not_reuse_the_remembered_account():
+    pages = [
+        _page("https://app.example:443/signup", "Create Account", "Create Account"),
+        _page("https://app.example:443/login", "Sign In", "Sign in"),
+    ]
+    memory = {"signup_done": True, "username": "qaabc123"}
+    goal = "test only signup and create new user"
+    assert goal_wants_fresh_account(goal) is True
+    assert goal_wants_fresh_account("test only signup") is False
+    assert goal_wants_fresh_account("Do not create a new user") is False
+    updated = apply_advice(
+        decide(pages, memory),
+        {
+            "summary": "Create new user",
+            "create_account": False,
+            "sign_in": True,
+            "_source": "meta-llama/Llama-3.3-70B-Instruct",
+        },
+        memory,
+        goal,
+    )
+    assert updated.create_account is True
+    assert updated.sign_in is False
+    assert updated.mind == "huggingface:meta-llama/Llama-3.3-70B-Instruct"
 
 
 def test_memory_summary_hides_the_password():

@@ -8,7 +8,7 @@ import httpx
 
 from app.config import Settings
 from app.generation.llm import extract_json
-from app.mind.plan import FlowDecision, _FOCUS, goal_allows_account
+from app.mind.plan import FlowDecision, _FOCUS, goal_allows_account, goal_wants_fresh_account
 from app.models import DiscoveredPage
 from app.security.text import redact
 
@@ -61,6 +61,15 @@ def apply_advice(decision: FlowDecision, payload: dict | None, memory: dict, goa
             decision.summary = (
                 "The prompt does not ask for an account, so signup and sign-in stay closed. "
                 "Public screens are checked once. Quotes and payments are not submitted."
+            )
+        return decision
+    if goal_wants_fresh_account(goal) and decision.signup_url:
+        decision.create_account = True
+        decision.sign_in = False
+        if decision.mind == "built-in":
+            decision.summary = (
+                "The prompt asks for a new user. One new account will be created. "
+                "The older remembered account will not be reused for this signup."
             )
         return decision
     if not isinstance(payload, dict):

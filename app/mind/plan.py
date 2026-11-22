@@ -102,13 +102,25 @@ def decide(pages: list[DiscoveredPage], memory: dict) -> FlowDecision:
 
 
 _ACCOUNT_ASK = re.compile(
-    r"\b(sign[\s-]?up|create (?:an? |one )?account|register|sign[\s-]?in|log[\s-]?in)\b",
+    r"\b(sign[\s-]?up|create (?:an? |one |a )?(?:new )?(?:account|user)|register|sign[\s-]?in|log[\s-]?in)\b",
     re.IGNORECASE,
 )
 _ACCOUNT_REFUSE = re.compile(
-    r"\b(?:do not|don't|never|without)\b(?:\W+\w+){0,8}\W+\b(?:sign[\s-]?up|account|register|quote|pay|purchase)\b",
+    r"\b(?:do not|don't|never|without)\b(?:\W+\w+){0,8}\W+\b(?:sign[\s-]?up|account|user|register|quote|pay|purchase)\b",
     re.IGNORECASE,
 )
+_FRESH_ACCOUNT = re.compile(
+    r"\b(?:new|another|fresh)\b(?:\W+\w+){0,5}\W+\b(?:user|account)\b",
+    re.IGNORECASE,
+)
+
+
+def goal_wants_fresh_account(goal: str) -> bool:
+    """An explicit new user or account is created even when one is already remembered."""
+    text = goal.strip()
+    if not text or _ACCOUNT_REFUSE.search(text):
+        return False
+    return bool(_FRESH_ACCOUNT.search(text))
 
 
 def goal_allows_account(goal: str) -> bool:
