@@ -68,9 +68,10 @@ async def design_suite(
         questions.append(
             f"{requirement.requirement_id} is not covered by a discovered page: {requirement.text[:180]}"
         )
-    if not settings.llm_api_key and llm_complete is None:
+    if not settings.llm_api_key and not settings.hf_token and llm_complete is None:
         reason = (
-            "Deterministic page-load smoke fallback: no LLM API key is configured (QA_LLM_API_KEY)."
+            "Deterministic page-load smoke fallback: no model key is configured "
+            "(QA_LLM_API_KEY or QA_HF_TOKEN)."
         )
         questions.append(reason)
         return GenerationResult(

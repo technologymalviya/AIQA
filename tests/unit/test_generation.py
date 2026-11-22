@@ -118,6 +118,96 @@ def test_grounded_model_suite_keeps_llm_provenance(tmp_path: Path):
     assert all(step.action != "evaluate" for case in result.cases for step in case.steps)
 
 
+def test_hugging_face_token_is_the_planner_without_an_openai_key(tmp_path: Path):
+    captured: dict = {}
+
+    class _Response:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "model": "meta-llama/Llama-3.3-70B-Instruct",
+                "usage": {"prompt_tokens": 3, "completion_tokens": 4},
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "cases": [
+                                        {
+                                            "title": "Home loads",
+                                            "summary": "Open the home page.",
+                                            "steps": [
+                                                {"action": "goto", "target": "http://127.0.0.1:9/demo/", "expected": ""},
+                                                {"action": "assert_http_status", "target": "", "expected": "2xx"},
+                                            ],
+                                        }
+                                    ]
+                                }
+                            )
+                        }
+                    }
+                ],
+            }
+
+    class _Client:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args) -> None:
+            return None
+
+        async def post(self, url: str, json: dict, headers: dict) -> _Response:
+            captured["url"] = url
+            captured["model"] = json["model"]
+            captured["auth"] = headers["Authorization"]
+            return _Response()
+
+    settings = _settings(tmp_path, None)
+    settings = Settings(
+        runs_dir=settings.runs_dir,
+        navigation_timeout_ms=settings.navigation_timeout_ms,
+        action_timeout_ms=settings.action_timeout_ms,
+        run_timeout_s=settings.run_timeout_s,
+        max_pages_cap=settings.max_pages_cap,
+        llm_base_url=settings.llm_base_url,
+        llm_api_key=None,
+        llm_model=settings.llm_model,
+        browser_channel=None,
+        retain_pass_media=False,
+        hf_token="hf_exampletoken12345678",
+        hf_model="meta-llama/Llama-3.3-70B-Instruct",
+        hf_base_url="https://router.huggingface.co/v1",
+    )
+    import app.generation.llm as llm_module
+
+    original = llm_module.httpx.AsyncClient
+    llm_module.httpx.AsyncClient = _Client
+    try:
+        result = asyncio.run(
+            design_suite(
+                _discovery(),
+                mode="hybrid",
+                requirements_text="Check the home page loads.",
+                settings=settings,
+            )
+        )
+    finally:
+        llm_module.httpx.AsyncClient = original
+    assert captured["url"] == "https://router.huggingface.co/v1/chat/completions"
+    assert captured["model"] == "meta-llama/Llama-3.3-70B-Instruct"
+    assert captured["auth"].startswith("Bearer ")
+    assert "hf_exampletoken12345678" not in result.fallback_reason
+    assert result.provenance is Provenance.LLM
+    assert result.model == "meta-llama/Llama-3.3-70B-Instruct"
+
+
 def test_missing_key_uses_heuristic(tmp_path: Path):
     result = asyncio.run(
         design_suite(
@@ -128,7 +218,7 @@ def test_missing_key_uses_heuristic(tmp_path: Path):
         )
     )
     assert result.provenance is Provenance.HEURISTIC
-    assert "no LLM API key" in result.fallback_reason
+    assert "QA_HF_TOKEN" in result.fallback_reason
     assert any("mode is auto" in question for question in result.open_questions)
 
 

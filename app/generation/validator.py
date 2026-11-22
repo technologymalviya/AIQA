@@ -136,15 +136,19 @@ def _ground_case(raw: _ModelCase, pages: dict[str, DiscoveredPage], origin: Orig
     current: DiscoveredPage | None = None
     for step in raw.steps:
         action = step.action.strip()
-        if action not in _ALLOWED or _blob_unsafe(step.target) or _blob_unsafe(step.expected):
+        if _blob_unsafe(step.target) or _blob_unsafe(step.expected):
             return None
+        if action not in _ALLOWED:
+            return False
         if action == "goto":
             try:
                 url = check_target(step.target, authorized=origin)
             except ScopeError:
+                return False
+            if path_is_destructive(url):
                 return None
-            if path_is_destructive(url) or url not in pages:
-                return None
+            if url not in pages:
+                return False
             current = pages[url]
             steps.append(TestStep(action="goto", target=url, timeout_ms=_timeout(step.timeout_ms)))
             continue

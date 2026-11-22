@@ -143,6 +143,7 @@ async def _execute(store: RunStore, run_id: str, settings: Settings, llm_complet
                 choose=(lambda labels, checked: choose_nav(settings, labels, checked))
                 if settings.hf_token or settings.hf_local
                 else None,
+                goal=request.get("requirements_text", ""),
             )
             results.extend(looked)
         deadline = started + settings.run_timeout_s
