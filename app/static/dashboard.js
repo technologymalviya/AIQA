@@ -6,6 +6,7 @@
   var log = document.getElementById("live-log");
   var statusNode = document.getElementById("live-status");
   var captionNode = document.getElementById("live-caption");
+  var seen = 0;
   var startedRunning = document.body.getAttribute("data-status") === "queued"
     || document.body.getAttribute("data-status") === "running";
 
@@ -20,13 +21,22 @@
       captionNode.textContent = rows[rows.length - 1].caption || "Watching the page";
     }
     if (log) {
-      log.replaceChildren();
+      var firstPaint = log.childElementCount === 0;
+      var nearBottom = firstPaint || log.scrollHeight - log.scrollTop - log.clientHeight < 48;
       rows.forEach(function (row, index) {
+        var number = index + 1;
+        if (number <= seen) return;
         var item = document.createElement("li");
+        item.value = number;
         item.textContent = row.caption || row.kind || "";
-        if (index === rows.length - 1) item.className = "latest";
         log.appendChild(item);
+        seen = number;
       });
+      Array.prototype.forEach.call(log.children, function (item) {
+        item.className = "";
+      });
+      if (log.lastElementChild) log.lastElementChild.className = "latest";
+      if (nearBottom) log.scrollTop = log.scrollHeight;
     }
     if (data.status === "queued" || data.status === "running") {
       window.setTimeout(pull, 900);

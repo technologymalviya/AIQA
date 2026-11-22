@@ -234,7 +234,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except (FileNotFoundError, ValueError):
             return _error(404, "not_found", "Run not found")
         rows = []
-        for row in app.state.store.events(run_id)[-80:]:
+        # The whole log is returned so the numbers stay with the lines that produced them.
+        for row in app.state.store.events(run_id):
             rows.append(
                 {
                     "ts": row.get("ts", ""),
