@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 import secrets
+import time
 from urllib.parse import urlsplit
 
 from playwright.async_api import Browser, Error as PlaywrightError
@@ -33,7 +35,11 @@ _SKIP_CLICK = (
     "remove",
     "start free",
     "privacy",
+    "upgrade",
+    "password",
+    "copy",
 )
+_ADMIN_SECTIONS = ("customer", "delivery boy", "milk buy", "settings", "notification")
 _FIELDS = (
     ("confirm", ("confirm password", "re-enter")),
     ("password", ("password",)),
@@ -56,6 +62,7 @@ async def run_journey(
     on_note,
     cancel_check,
     choose_nav=None,
+    goal: str = "",
 ) -> tuple[list[CaseResult], set[str], dict]:
     """Return case results, URLs already covered, and the updated memory."""
     handled = {url for url in (decision.signup_url, decision.signin_url) if url}
@@ -79,7 +86,7 @@ async def run_journey(
         if memory.get("signin_done") and memory.get("entered_url") and not decision.create_account:
             await _goto(page, memory["entered_url"], origin)
             await capture(page, on_screen, "Opening the remembered screen")
-            signed_in = await _shell(page)
+            signed_in = await _app_open(page, 2500)
             if signed_in:
                 on_note("Already signed in from the remembered session.")
                 steps.append(StepResult(action="signin", passed=True, actual="remembered session"))
@@ -99,13 +106,17 @@ async def run_journey(
                     memory["signin_done"] = True
                     on_note(f"Signup signed in as {account['username']}. Sign-in will not be repeated.")
                 elif decision.signin_url:
-                    signed_in = await _do_signin(page, decision, memory, settings, steps, on_note, on_screen)
+                    signed_in = await _do_signin(
+                        page, decision, memory, settings, steps, on_note, on_screen, goal
+                    )
             else:
                 on_note(scrub(outcome.error or "Signup did not finish.", memory))
         elif not signed_in and decision.sign_in:
-            signed_in = await _do_signin(page, decision, memory, settings, steps, on_note, on_screen)
+            signed_in = await _do_signin(page, decision, memory, settings, steps, on_note, on_screen, goal)
         if signed_in:
-            await _walk_nav(page, memory, on_screen, on_note, cancel_check, choose_nav)
+            if _wants_admin(goal):
+                on_note("Signed in. Checking the admin flow.")
+            await _walk_nav(page, memory, on_screen, on_note, cancel_check, choose_nav, goal)
             try:
                 state_path.parent.mkdir(parents=True, exist_ok=True)
                 await context.storage_state(path=str(state_path))
@@ -152,9 +163,11 @@ async def run_journey(
                 pass
 
 
-async def _do_signin(page, decision: FlowDecision, memory: dict, settings: Settings, steps, on_note, on_screen) -> bool:
+async def _do_signin(
+    page, decision: FlowDecision, memory: dict, settings: Settings, steps, on_note, on_screen, goal: str = ""
+) -> bool:
     on_note("Signing in with the remembered account.")
-    outcome = await _signin(page, decision.signin_url, memory, settings)
+    outcome = await _signin(page, decision.signin_url, memory, settings, goal)
     steps.append(outcome)
     await capture(page, on_screen, f"Sign in as {memory.get('username')}")
     if not outcome.passed:
@@ -199,7 +212,7 @@ async def _signup(page, url: str, origin: str, account: dict, settings: Settings
         return StepResult(action="signup", passed=False, error=redact(exc, 300), kind="runner")
 
 
-async def _signin(page, url: str, memory: dict, settings: Settings) -> StepResult:
+async def _signin(page, url: str, memory: dict, settings: Settings, goal: str = "") -> StepResult:
     try:
         await _goto(page, url, memory.get("origin") or "")
         await _dismiss_banner(page)
@@ -209,19 +222,21 @@ async def _signin(page, url: str, memory: dict, settings: Settings) -> StepResul
                 timeout=5000,
             )
         except PlaywrightTimeoutError:
-            if await _shell(page) or await _has_session(page):
+            if await _app_open(page, 2000):
                 return StepResult(action="signin", passed=True, actual=str(memory.get("username") or ""))
             return StepResult(action="signin", passed=False, error="sign-in form fields were not found", kind="runner")
+        if _wants_admin(goal):
+            await _pick_admin(page)
         values = {"username": memory.get("username") or "", "password": memory.get("password") or ""}
         if not await _fill_form(page, values):
-            if await _shell(page) or await _has_session(page):
+            if await _app_open(page, 2000):
                 return StepResult(action="signin", passed=True, actual=str(memory.get("username") or ""))
             return StepResult(action="signin", passed=False, error="sign-in form fields were not found", kind="runner")
         await _submit(page, settings.navigation_timeout_ms)
         error = await _form_error(page)
         if error:
             return StepResult(action="signin", passed=False, error=redact(error, 300), kind="assertion")
-        if await _shell(page) or await _has_session(page):
+        if await _app_open(page, min(settings.navigation_timeout_ms, 8000)):
             return StepResult(action="signin", passed=True, actual=str(memory.get("username") or ""))
         return StepResult(action="signin", passed=False, error="sign-in did not open the app", kind="assertion")
     except PlaywrightTimeoutError:
@@ -230,10 +245,13 @@ async def _signin(page, url: str, memory: dict, settings: Settings) -> StepResul
         return StepResult(action="signin", passed=False, error=redact(exc, 300), kind="runner")
 
 
-async def _walk_nav(page, memory: dict, on_screen, on_note, cancel_check, choose_nav=None) -> None:
+async def _walk_nav(page, memory: dict, on_screen, on_note, cancel_check, choose_nav=None, goal: str = "") -> None:
     checked = {str(item) for item in memory.get("nav_checked") or []}
     labels = await _nav_labels(page)
-    if choose_nav is not None and labels:
+    admin = _wants_admin(goal)
+    if admin:
+        labels = admin_sections(labels)
+    elif choose_nav is not None and labels:
         try:
             picked = await choose_nav(labels, sorted(checked))
         except Exception:
@@ -245,18 +263,28 @@ async def _walk_nav(page, memory: dict, on_screen, on_note, cancel_check, choose
     for label in labels:
         if cancel_check and cancel_check():
             break
-        if label in checked:
+        if label in checked and not admin:
             on_note(f"Skipping {label}. That step is already remembered.")
             continue
         if fresh >= 8:
             break
         try:
-            await page.get_by_role("button", name=label, exact=True).first.click(timeout=3000)
+            locator = page.get_by_role("button", name=label, exact=True)
+            if await locator.count() == 0:
+                locator = page.get_by_role("button", name=label, exact=False)
+            await locator.first.click(timeout=3000)
         except PlaywrightError:
+            on_note(f"I could not open {label}.")
             continue
         fresh += 1
         checked.add(label)
-        on_note(f"Opened {label} once.")
+        if admin:
+            await page.wait_for_timeout(400)
+            heading = await _heading(page)
+            on_note(f"I'll open {label}.")
+            on_note(f"Now I see {label}. The heading is {heading or label}.")
+        else:
+            on_note(f"Opened {label} once.")
         await capture(page, on_screen, f"Opened {label}")
         await page.wait_for_timeout(300)
     memory["nav_checked"] = sorted(checked)
@@ -466,6 +494,50 @@ async def _open_ready(page) -> None:
             return
         except PlaywrightError:
             return
+
+
+def _wants_admin(goal: str) -> bool:
+    return "admin" in goal.lower()
+
+
+def admin_sections(labels: list[str]) -> list[str]:
+    """Owner-desk sections for an admin check. Tickets, logout, and payment stay out."""
+    chosen: list[str] = []
+    for label in labels:
+        lowered = label.lower()
+        if any(part in lowered for part in ("ticket", "logout", "sign out", "upgrade", "password", "copy", "add a")):
+            continue
+        if any(lowered == name or lowered.startswith(name) for name in _ADMIN_SECTIONS):
+            chosen.append(label)
+    return chosen
+
+
+async def _app_open(page, timeout_ms: int) -> bool:
+    """The owner desk paints, then repaints. A one-shot check sees the gap and reports failure."""
+    locator = page.get_by_role("button", name="Customer", exact=True)
+    deadline = time.monotonic() + max(timeout_ms, 0) / 1000
+    while time.monotonic() < deadline:
+        try:
+            if await locator.count() and await locator.first.is_visible():
+                await page.wait_for_timeout(500)
+                if await locator.count() and await locator.first.is_visible():
+                    return True
+        except PlaywrightError:
+            pass
+        await page.wait_for_timeout(200)
+    return await _shell(page)
+
+
+async def _pick_admin(page) -> None:
+    """Choose the dairy-owner role. Leave Signup as Admin alone."""
+    button = page.get_by_role("button", name=re.compile(r"^Admin\b"))
+    try:
+        if await button.count() == 0:
+            return
+        await button.first.click(timeout=2000)
+        await page.wait_for_timeout(200)
+    except PlaywrightError:
+        return
 
 
 async def _shell(page) -> bool:

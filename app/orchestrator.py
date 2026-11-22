@@ -125,12 +125,21 @@ async def _execute(store: RunStore, run_id: str, settings: Settings, llm_complet
             choose_nav=(lambda labels, checked: choose_nav(settings, labels, checked))
             if settings.hf_token or settings.hf_local
             else None,
+            goal=request.get("requirements_text", ""),
         )
         save_memory(settings.runs_dir, memory)
         allowed = {page.url for page in discovery.pages if not page.redirect_escape}
         evidence_root = run_dir / "evidence"
         results: list[CaseResult] = list(journey_results)
-        if not store.cancelled(run_id) and time.monotonic() < started + settings.run_timeout_s:
+        admin_signed_in = "admin" in request.get("requirements_text", "").lower() and any(
+            result.verdict == Verdict.PASS and result.title == "Use one remembered account"
+            for result in journey_results
+        )
+        if (
+            not admin_signed_in
+            and not store.cancelled(run_id)
+            and time.monotonic() < started + settings.run_timeout_s
+        ):
             looked = await look_around(
                 browser,
                 start_url=request["target_url"],

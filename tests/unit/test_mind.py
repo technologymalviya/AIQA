@@ -1,5 +1,6 @@
 from app.mind.advisor import apply_advice
 from app.mind.memory import scrub
+from app.mind.journey import admin_sections
 from app.mind.plan import decide, goal_allows_account, goal_wants_fresh_account, pages_for_focus, role_of, unique_pages
 from app.models import DiscoveredPage
 
@@ -130,3 +131,22 @@ def test_create_new_user_does_not_reuse_the_remembered_account():
 def test_memory_summary_hides_the_password():
     secret = "s3cret-token-value"
     assert secret not in scrub(f"failed with {secret}", {"password": secret})
+
+
+def test_admin_flow_opens_the_owner_desk_and_skips_tickets():
+    labels = admin_sections(
+        [
+            "Customer",
+            "Delivery Boy",
+            "Milk Buy",
+            "Raise Ticket",
+            "Settings",
+            "Notification",
+            "Logout",
+            "Upgrade to Active",
+            "Change Password",
+            "Copy login details",
+            "Add a customer",
+        ]
+    )
+    assert labels == ["Customer", "Delivery Boy", "Milk Buy", "Settings", "Notification"]
