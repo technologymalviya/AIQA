@@ -13,6 +13,7 @@ from app.discovery.crawler import crawl
 from app.execution.runner import execute_case, launch_browser
 from app.generation.design import design_suite
 from app.mind.advisor import advise, apply_advice, choose_nav
+from app.mind.follow import session_seconds
 from app.mind.hands import look_around
 from app.mind.journey import run_journey
 from app.mind.memory import load_memory, save_memory, scrub
@@ -153,7 +154,7 @@ async def _execute(store: RunStore, run_id: str, settings: Settings, llm_complet
                 goal=request.get("requirements_text", ""),
             )
             results.extend(looked)
-        deadline = started + settings.run_timeout_s
+        deadline = started + session_seconds(request.get("requirements_text", ""), settings.run_timeout_s)
         for case in generated.cases:
             targets = {step.target for step in case.steps if step.action == "goto"}
             if targets and targets <= handled:

@@ -81,7 +81,64 @@ def named_roles(goal: str) -> list[str]:
     return found
 
 
-def open_work(goal: str, finished: list[str]) -> str:
+_FLOW_SKIP = (
+    "add ",
+    "copy",
+    "edit",
+    "active",
+    "inactive",
+    "delete",
+    "save",
+    "cancel",
+    "close",
+    "minimize",
+    "back",
+    "show",
+    "reject",
+    "accept",
+    "continue",
+    "forgot",
+    "signup",
+    "upgrade",
+    "change password",
+)
+
+
+def wants_flow(goal: str) -> bool:
+    return bool(re.search(r"\b(check|flow|test)\b", goal or "", re.IGNORECASE))
+
+
+def flow_sections(buttons: list[str]) -> list[str]:
+    """Screens that belong to a signed-in role, leaving out create, copy, and pay."""
+    found: list[str] = []
+    for label in buttons:
+        lowered = label.lower()
+        if closed_label(label) or any(lowered.startswith(part) for part in _FLOW_SKIP):
+            continue
+        if label not in found:
+            found.append(label)
+    return found[:8]
+
+
+def session_limit(goal: str) -> int:
+    """How many steps this request needs. A longer request gets a longer session."""
+    text = (goal or "").lower()
+    steps = 8 + 3 * max(len(named_roles(goal)), 1)
+    if "create" in text:
+        steps += 5
+    if "copy" in text:
+        steps += 4
+    if wants_flow(goal):
+        steps += 8
+    return min(max(steps, 12), 40)
+
+
+def session_seconds(goal: str, floor: int) -> int:
+    """Wall-clock budget. Each step needs time for the model and the page."""
+    return min(max(int(floor), session_limit(goal) * 25), 900)
+
+
+def open_work(goal: str, finished: list[str], sections: list[str] | None = None) -> str:
     """The single part of the request that still has to happen."""
     text = (goal or "").lower()
     lowered = [item.lower() for item in finished]
@@ -97,13 +154,23 @@ def open_work(goal: str, finished: list[str]) -> str:
         return "copy the credential shown for the new login"
     if pending:
         return f"sign in as {pending[0]}"
-    if re.search(r"\b(check|flow|test)\b", text):
+    if wants_flow(goal):
         last = -1
         for index, item in enumerate(lowered):
             if item.startswith("signed in as "):
                 last = index
-        if not any(item.startswith("opened ") for item in lowered[last + 1 :]):
-            return "open a screen for the signed-in role"
+        opened = {
+            item[len("opened ") :]
+            for item in lowered[last + 1 :]
+            if item.startswith("opened ")
+        }
+        if sections is None:
+            if not opened:
+                return "open a screen for the signed-in role"
+        else:
+            left = [label for label in sections if label.lower() not in opened]
+            if left:
+                return "open a screen for the signed-in role"
     return "the request is complete"
 
 
@@ -271,9 +338,11 @@ async def follow_request(
     on_note,
     cancel_check,
     ask=None,
-    limit: int = 16,
+    limit: int | None = None,
 ) -> None:
     """Carry out the request. Stop when the model is done or the screen cannot support the step."""
+    if limit is None:
+        limit = session_limit(goal)
     if ask is None:
         ask = lambda screen, finished: next_action(settings, goal, screen, finished)
     finished: list[str] = []
@@ -292,6 +361,7 @@ async def follow_request(
     copied_blobs: list[str] = []
     last_label = ""
     created_near = ""
+    sections: list[str] | None = None
 
     async def on_dialog(dialog) -> None:
         notices.append(dialog.message or "")
@@ -348,7 +418,22 @@ async def follow_request(
             if filled_fields is not None and screen["fields"] == filled_fields:
                 screen["fields"] = []
             opened = {item[len("opened ") :] for item in finished if item.startswith("opened ")}
-            work = open_work(goal, finished)
+            in_flow = wants_flow(goal) and (
+                sections is not None or open_work(goal, finished).startswith("open a screen")
+            )
+            if in_flow:
+                visible = flow_sections(screen["buttons"])
+                if sections is None:
+                    sections = list(visible)
+                    if sections:
+                        on_note("I'll go through the screens on this role.")
+                else:
+                    known = {label.lower() for label in sections}
+                    for label in visible:
+                        if label.lower() not in known and len(sections) < 8:
+                            sections.append(label)
+                            known.add(label.lower())
+            work = open_work(goal, finished, sections)
             if notice and not found:
                 work = f"do what the page says: {notice[:180]}"
             if screen["fields"] and work.startswith(("create ", "copy the credential", "do what the page says")):
@@ -356,9 +441,25 @@ async def follow_request(
             screen["buttons"] = [
                 label for label in order_for_goal(screen["buttons"], goal, work) if label not in opened
             ][:18]
+            if work.startswith("open a screen") and sections:
+                opened_labels = {item.lower() for item in opened}
+                left_here = [
+                    label
+                    for label in sections
+                    if label.lower() not in opened_labels
+                    and any(label.lower() == button.lower() for button in screen["buttons"])
+                ]
+                if left_here:
+                    screen["buttons"] = left_here
+                else:
+                    sections[:] = [label for label in sections if label.lower() in opened_labels]
+                    work = open_work(goal, finished, sections)
             screen["roles"] = list(dict.fromkeys([*named_roles(goal), *screen["roles"]]))
             screen["notice"] = notice
             screen["still"] = work
+            if work == "the request is complete" and sections is not None:
+                on_note("That covers the request.")
+                break
             if work.startswith("sign in as "):
                 screen["roles"] = [work.split("sign in as ", 1)[1]]
                 screen["buttons"] = []

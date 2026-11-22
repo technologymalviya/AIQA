@@ -7,6 +7,7 @@ from app.mind.follow import (
     grounded_action,
     login_from_fields,
     named_roles,
+    session_limit,
     off_order,
     open_work,
     order_for_goal,
@@ -205,3 +206,10 @@ def test_a_request_is_followed_one_grounded_step_at_a_time():
     signed_in = [*created, "signed in as delivery boy"]
     assert open_work(goal, signed_in).startswith("open a screen")
     assert open_work(goal, [*signed_in, "opened Today"]) == "the request is complete"
+    role_screens = ["Today", "Collect", "Houses"]
+    assert open_work(goal, [*signed_in, "opened Today"], role_screens).startswith("open a screen")
+    assert open_work(goal, [*signed_in, "opened Today", "opened Collect", "opened Houses"], role_screens) == (
+        "the request is complete"
+    )
+    assert session_limit(goal) > session_limit("open the home page")
+    assert session_limit(copying) >= session_limit(goal)
