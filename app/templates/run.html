@@ -54,6 +54,25 @@
       </table>
     </section>
     {% endif %}
+    {% if cases %}
+    <section class="card">
+      <h2>Test cases</h2>
+      <p class="meta">{{ cases|length }} generated.</p>
+      <table>
+        <thead><tr><th>Id</th><th>Title</th><th>Steps</th><th>Provenance</th></tr></thead>
+        <tbody>
+        {% for item in cases %}
+        <tr>
+          <td>{{ item.test_case_id }}</td>
+          <td>{{ item.title }}</td>
+          <td>{{ item.steps|length }}</td>
+          <td>{{ item.provenance }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </section>
+    {% endif %}
     {% if results %}
     <section class="card">
       <h2>Results</h2>

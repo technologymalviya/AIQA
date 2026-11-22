@@ -105,6 +105,10 @@ _ACCOUNT_ASK = re.compile(
     r"\b(sign[\s-]?up|create (?:an? |one |a )?(?:new )?(?:account|user)|register|sign[\s-]?in|log[\s-]?in)\b",
     re.IGNORECASE,
 )
+_END_TO_END = re.compile(
+    r"\b(end[\s-]?to[\s-]?end|e2e|test the (?:app|application)|test this app fully)\b",
+    re.IGNORECASE,
+)
 _ACCOUNT_REFUSE = re.compile(
     r"\b(?:do not|don't|never|without)\b(?:\W+\w+){0,8}\W+\b(?:sign[\s-]?up|account|user|register|quote|pay|purchase)\b",
     re.IGNORECASE,
@@ -123,6 +127,14 @@ def goal_wants_fresh_account(goal: str) -> bool:
     return bool(_FRESH_ACCOUNT.search(text))
 
 
+def goal_wants_end_to_end(goal: str) -> bool:
+    """An end-to-end request uses the remembered account and then walks the signed-in app."""
+    text = goal.strip()
+    if not text or _ACCOUNT_REFUSE.search(text):
+        return False
+    return bool(_END_TO_END.search(text))
+
+
 def goal_allows_account(goal: str) -> bool:
     """An empty prompt keeps the older signup behavior. A prompt that does not ask does not."""
     text = goal.strip()
@@ -130,7 +142,7 @@ def goal_allows_account(goal: str) -> bool:
         return True
     if _ACCOUNT_REFUSE.search(text):
         return False
-    return bool(_ACCOUNT_ASK.search(text))
+    return bool(_ACCOUNT_ASK.search(text) or goal_wants_end_to_end(text))
 
 
 def pages_for_focus(pages: list[DiscoveredPage], focus: list[str]) -> list[DiscoveredPage]:

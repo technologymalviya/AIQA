@@ -14,7 +14,15 @@ from app.mind.follow import (
     plan_fields,
     too_early,
 )
-from app.mind.plan import decide, goal_allows_account, goal_wants_fresh_account, pages_for_focus, role_of, unique_pages
+from app.mind.plan import (
+    decide,
+    goal_allows_account,
+    goal_wants_end_to_end,
+    goal_wants_fresh_account,
+    pages_for_focus,
+    role_of,
+    unique_pages,
+)
 from app.models import DiscoveredPage
 
 
@@ -103,6 +111,9 @@ def test_a_public_prompt_does_not_open_an_account():
     assert goal_allows_account(goal) is False
     assert goal_allows_account("test only signup") is True
     assert goal_allows_account("") is True
+    assert goal_wants_end_to_end("test end to end") is True
+    assert goal_allows_account("test end to end") is True
+    assert goal_wants_end_to_end(goal) is False
     updated = apply_advice(
         decision,
         {"summary": "Create an account and buy a policy at https://insurer.example/signup", "create_account": True},

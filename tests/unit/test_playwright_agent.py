@@ -52,3 +52,40 @@ def test_playwright_agent_runs_a_generated_case_the_journey_already_opened():
     )
     assert seen == ["TC-AAAA1111", "TC-BBBB2222"]
     assert [item.verdict for item in results] == [Verdict.PASS, Verdict.PASS]
+
+
+def test_a_failed_case_is_run_again_and_the_suite_continues():
+    first = _case("TC-AAAA1111", "https://dairyhisab.in/")
+    second = _case("TC-BBBB2222", "https://dairyhisab.in/login")
+    calls: list[str] = []
+
+    async def execute(_browser, case, **_kwargs):
+        calls.append(case.test_case_id)
+        verdict = Verdict.FAIL if case.test_case_id == "TC-AAAA1111" and calls.count("TC-AAAA1111") == 1 else Verdict.PASS
+        return CaseResult(
+            test_case_id=case.test_case_id,
+            title=case.title,
+            provenance=case.provenance,
+            verdict=verdict,
+            classification="none",
+        )
+
+    notes: list[str] = []
+    results = asyncio.run(
+        run_generated_cases(
+            None,
+            [first, second],
+            origin=None,
+            allowed_urls=set(),
+            evidence_root=None,
+            settings=None,
+            environment={},
+            deadline=time.monotonic() + 30,
+            cancelled=lambda: False,
+            on_note=notes.append,
+            execute=execute,
+        )
+    )
+    assert calls == ["TC-AAAA1111", "TC-AAAA1111", "TC-BBBB2222"]
+    assert [item.verdict for item in results] == [Verdict.PASS, Verdict.PASS]
+    assert any(note.startswith("Generated 2 test cases:") for note in notes)

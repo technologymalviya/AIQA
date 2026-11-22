@@ -13,7 +13,7 @@ from playwright.async_api import Browser
 from app.config import Settings
 from app.execution.runner import execute_case
 from app.execution.verdict import judge
-from app.models import CaseResult, TestCase
+from app.models import CaseResult, TestCase, Verdict
 from app.security.url_policy import Origin
 
 
@@ -33,8 +33,12 @@ async def run_generated_cases(
     on_verdict=None,
     execute=execute_case,
 ) -> list[CaseResult]:
-    """Execute the generated suite. Order is the suite order."""
+    """Execute the generated suite. A failed case is run once more, then the suite continues."""
     results: list[CaseResult] = []
+    if on_note and cases:
+        listed = "; ".join(case.title for case in cases[:12])
+        extra = f" and {len(cases) - 12} more" if len(cases) > 12 else ""
+        on_note(f"Generated {len(cases)} test cases: {listed}{extra}.")
     for case in cases:
         if cancelled():
             results.append(_stopped(case, "cancelled before execution", environment))
@@ -44,20 +48,36 @@ async def run_generated_cases(
             continue
         if on_note:
             on_note(f"Playwright is running {case.title}.")
-        outcome = await execute(
-            browser,
-            case,
-            origin=origin,
-            allowed_urls=allowed_urls,
-            evidence_root=evidence_root,
-            settings=settings,
-            environment=environment,
-            on_screen=on_screen,
+        outcome = await _execute_once(
+            execute, browser, case, origin, allowed_urls, evidence_root, settings, environment, on_screen
         )
+        if _needs_retry(outcome) and not cancelled() and time.monotonic() <= deadline:
+            if on_note:
+                on_note(f"{case.title} did not pass. I'll run that case again.")
+            outcome = await _execute_once(
+                execute, browser, case, origin, allowed_urls, evidence_root, settings, environment, on_screen
+            )
         results.append(outcome)
         if on_verdict:
             on_verdict(outcome)
     return results
+
+
+def _needs_retry(outcome: CaseResult) -> bool:
+    return outcome.verdict in {Verdict.FAIL, Verdict.INCONCLUSIVE}
+
+
+async def _execute_once(execute, browser, case, origin, allowed_urls, evidence_root, settings, environment, on_screen):
+    return await execute(
+        browser,
+        case,
+        origin=origin,
+        allowed_urls=allowed_urls,
+        evidence_root=evidence_root,
+        settings=settings,
+        environment=environment,
+        on_screen=on_screen,
+    )
 
 
 def _stopped(case: TestCase, reason: str, environment: dict[str, str]) -> CaseResult:

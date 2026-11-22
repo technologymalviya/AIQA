@@ -18,7 +18,7 @@ from app.mind.follow import session_seconds
 from app.mind.hands import look_around
 from app.mind.journey import run_journey
 from app.mind.memory import load_memory, save_memory, scrub
-from app.mind.plan import decide, goal_allows_account, pages_for_focus
+from app.mind.plan import decide, goal_allows_account, goal_wants_end_to_end, pages_for_focus
 from app.models import CaseResult, CostLedger, Verdict
 from app.reporting.writer import (
     measured_bytes,
@@ -85,7 +85,8 @@ async def _execute(store: RunStore, run_id: str, settings: Settings, llm_complet
             used = decision.mind.split(":", 1)[-1]
             mind_note = f"Hugging Face {used}: {decision.summary}"
         store.event(run_id, "mind", {"note": redact(scrub(mind_note, memory), 300)})
-        focused_pages = pages_for_focus(decision.unique_pages or discovery.pages, decision.focus)
+        source_pages = decision.unique_pages or discovery.pages
+        focused_pages = source_pages if goal_wants_end_to_end(goal) else pages_for_focus(source_pages, decision.focus)
         focused = discovery.model_copy(update={"pages": focused_pages})
         generated = await design_suite(
             focused,

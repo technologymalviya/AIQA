@@ -147,7 +147,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             run = app.state.store.load(run_id)
         except (FileNotFoundError, ValueError):
             return HTMLResponse("Run not found", status_code=404)
-        pages, results = _optional_json(app.state.store, run_id)
+        pages, results, cases = _optional_json(app.state.store, run_id)
         evidence = []
         for item in results:
             if item.get("verdict") not in {"FAIL", "INCONCLUSIVE"}:
@@ -183,6 +183,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             {
                 "run": run,
                 "pages": pages,
+                "cases": cases,
                 "results": results,
                 "evidence": evidence,
                 "artefacts": present,
@@ -375,9 +376,10 @@ def _public_run(record: dict) -> dict:
     }
 
 
-def _optional_json(store: RunStore, run_id: str) -> tuple[list, list]:
+def _optional_json(store: RunStore, run_id: str) -> tuple[list, list, list]:
     pages: list = []
     results: list = []
+    cases: list = []
     try:
         discovery = json.loads(store.read_artefact(run_id, "discovery.json").read_text(encoding="utf-8"))
         pages = discovery.get("pages") or []
@@ -388,7 +390,12 @@ def _optional_json(store: RunStore, run_id: str) -> tuple[list, list]:
         results = payload.get("results") or []
     except (FileNotFoundError, ValueError, json.JSONDecodeError):
         results = []
-    return pages, results
+    try:
+        payload = json.loads(store.read_artefact(run_id, "test-cases.json").read_text(encoding="utf-8"))
+        cases = payload if isinstance(payload, list) else []
+    except (FileNotFoundError, ValueError, json.JSONDecodeError):
+        cases = []
+    return pages, results, cases
 
 
 def _activity_caption(row: dict) -> str:

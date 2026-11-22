@@ -58,7 +58,11 @@ The live page polls `/api/v1/runs/{id}/activity` and `/live/frame.png`. The fram
 
 The unfinished part is computed from the prompt and from what has already happened: create, then copy the credential the page shows, then sign in as the next role, then open the screens that role shows. A page alert replaces that part until it is handled. Copying the account that is already signed in does not count as the new login.
 
+An end-to-end prompt signs in with the remembered account and walks the screens of that role. It also keeps a generated case for every crawled page.
+
 The number of steps and the wall-clock budget grow with the prompt. A request that creates an account, copies a login, signs in as another role, and checks a flow gets more time than a request that only opens the home page. The floor is `QA_RUN_TIMEOUT_S` (420 seconds). The cap is 900 seconds.
+
+A generated case that fails is run once more, and the suite continues either way. An assertion failure does not skip the later steps of that case. A browser error still stops that attempt.
 
 ## Generated cases
 

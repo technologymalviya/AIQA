@@ -159,7 +159,7 @@ async def execute_case(
             steps.append(outcome)
             mark = "passed" if outcome.passed else "failed"
             await capture(page, on_screen, f"{case.title}: {step.action} {mark}")
-            if not outcome.passed:
+            if not outcome.passed and outcome.kind != "assertion":
                 break
         verdict, classification, kind, reason = judge(
             steps,
