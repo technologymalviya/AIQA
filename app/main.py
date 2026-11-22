@@ -7,6 +7,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
@@ -18,8 +19,9 @@ from app import __version__
 from app.config import Settings, load_settings
 from app.demo import demo_redirect, empty_favicon, router as demo_router
 from app.models import RunRequest
-from app.orchestrator import execute_run
+from app.orchestrator import continue_run, execute_run, queue_continuation
 from app.security.paths import DEFECT_NAME_RE, EVIDENCE_FILES, require_case_id, safe_child
+from app.security.text import redact
 from app.security.url_policy import ScopeError, check_target
 from app.storage.runs import RunStore
 
@@ -141,8 +143,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         return RedirectResponse(url=f"/runs/{record['run_id']}", status_code=303)
 
+    @app.post("/runs/{run_id}/continue")
+    async def continue_from_form(run_id: str, request: Request):
+        form = await request.form()
+        text = str(form.get("requirements_text") or "")
+        try:
+            record = queue_continuation(app.state.store, run_id, text)
+        except FileNotFoundError:
+            return HTMLResponse("Run not found", status_code=404)
+        except ValueError as exc:
+            return RedirectResponse(url=f"/runs/{run_id}?error={quote(_safe_error(exc))}", status_code=303)
+        except RuntimeError as exc:
+            if "still running" in str(exc):
+                return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
+            return RedirectResponse(url=f"/runs/{run_id}?error={quote(_safe_error(exc))}", status_code=303)
+        asyncio.create_task(continue_run(app.state.store, record["run_id"], app.state.settings))
+        return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
+
     @app.get("/runs/{run_id}", response_class=HTMLResponse)
-    def run_page(request: Request, run_id: str):
+    def run_page(request: Request, run_id: str, error: str = ""):
         try:
             run = app.state.store.load(run_id)
         except (FileNotFoundError, ValueError):
@@ -188,6 +207,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "evidence": evidence,
                 "artefacts": present,
                 "defects": defects,
+                "error": redact(error, 300),
             },
         )
         response.headers["Cache-Control"] = "no-store"

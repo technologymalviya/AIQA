@@ -119,6 +119,11 @@ _FRESH_ACCOUNT = re.compile(
 )
 
 
+def goal_refuses_account(goal: str) -> bool:
+    """The prompt tells the run to stay away from signup, an account, or payment."""
+    return bool(_ACCOUNT_REFUSE.search(goal.strip()))
+
+
 def goal_wants_fresh_account(goal: str) -> bool:
     """An explicit new user or account is created even when one is already remembered."""
     text = goal.strip()

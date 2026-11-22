@@ -44,6 +44,7 @@ flowchart TD
 6. **Look around.** This runs only when the prompt does not ask for an account. It clicks safe public controls and does not submit quotes, payments, or messages.
 7. **Playwright agent.** `run_generated_cases` executes every generated case, including a page the journey already opened. Each case gets its own browser context. The gate refuses a case with no steps, an action outside the six, a goto off the origin, or a goto that was not discovered.
 8. **Report.** `judge` reads the steps. The run page and the files under the run directory show the same verdicts.
+9. **Continue.** When the run is finished, the page asks for another prompt. That prompt stays on this run: the same origin, the remembered account, and the activity log. It does not crawl the site again. An end-to-end prompt also writes and runs cases for the screens already discovered.
 
 The live page polls `/api/v1/runs/{id}/activity` and `/live/frame.png`. The frame is one PNG overwritten as the browser moves. Notes in “What I'm doing” are the `mind` events.
 
