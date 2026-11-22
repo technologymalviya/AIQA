@@ -1,0 +1,10 @@
+# Phase 0 pilot. Ranges are pinned to the minor (or patch) line that was installed
+# and tested. See requirements.lock for the exact environment and README.md for
+# the install commands.
+fastapi>=0.165.0,<0.166
+uvicorn[standard]>=0.54.0,<0.55
+pydantic>=2.14.4,<2.15
+playwright>=1.65.2,<1.66
+httpx>=0.28.1,<0.29
+jinja2>=3.1.6,<3.2
+pytest>=9.2.0,<9.3
