@@ -71,7 +71,8 @@ def write_understanding(root: Path, discovery: Discovery, mode: str) -> None:
         f"- Pages visited: {len(discovery.pages)}",
         "",
         "The crawl reads each screen and does not collect typed-in values. "
-        "When the app has a signup screen, one later step creates a single test account and reuses it.",
+        "A test account is created only when the prompt asks for signup or sign-in, and then it is reused. "
+        "Quotes, payments, and messages are not submitted.",
         "",
         "## Pages",
         "",
@@ -82,6 +83,8 @@ def write_understanding(root: Path, discovery: Discovery, mode: str) -> None:
         lines.append(f"- URL: {markdown_text(page.url)}")
         lines.append(f"- Final URL: {markdown_text(page.final_url or page.url)}")
         lines.append(f"- HTTP status: {page.http_status if page.http_status is not None else 'none'}")
+        if page.challenge:
+            lines.append(f"- Browser check: {markdown_text(page.challenge)}")
         if page.load_error:
             lines.append(f"- Load error: {markdown_text(page.load_error)}")
         if page.redirect_escape:

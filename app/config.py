@@ -47,7 +47,7 @@ class Settings:
     browser_channel: str | None
     retain_pass_media: bool
     hf_token: str | None = None
-    hf_model: str = "meta-llama/Llama-3.1-8B-Instruct"
+    hf_model: str = "meta-llama/Llama-3.3-70B-Instruct"
     hf_base_url: str = "https://router.huggingface.co/v1"
     hf_local: bool = False
 
@@ -77,11 +77,11 @@ def load_settings() -> Settings:
     base = os.environ.get("QA_LLM_BASE_URL", "https://api.openai.com/v1").strip()
     model = os.environ.get("QA_LLM_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
     hf_token = os.environ.get("QA_HF_TOKEN", "").strip() or os.environ.get("HF_TOKEN", "").strip() or None
-    hf_model = os.environ.get("QA_HF_MODEL", "meta-llama/Llama-3.1-8B-Instruct").strip() or "meta-llama/Llama-3.1-8B-Instruct"
+    hf_model = os.environ.get("QA_HF_MODEL", "meta-llama/Llama-3.3-70B-Instruct").strip() or "meta-llama/Llama-3.3-70B-Instruct"
     hf_base = os.environ.get("QA_HF_BASE_URL", "https://router.huggingface.co/v1").strip()
     return Settings(
         runs_dir=Path(runs),
-        navigation_timeout_ms=_int_env("QA_NAVIGATION_TIMEOUT_MS", 6000, low=500, high=60000),
+        navigation_timeout_ms=_int_env("QA_NAVIGATION_TIMEOUT_MS", 15000, low=500, high=60000),
         action_timeout_ms=_int_env("QA_ACTION_TIMEOUT_MS", 6000, low=500, high=60000),
         run_timeout_s=_int_env("QA_RUN_TIMEOUT_S", 420, low=10, high=900),
         max_pages_cap=_int_env("QA_MAX_PAGES_CAP", 60, low=1, high=80),

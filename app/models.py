@@ -157,6 +157,7 @@ class DiscoveredPage(BaseModel):
     console_errors: list[str] = Field(default_factory=list)
     page_errors: list[str] = Field(default_factory=list)
     load_error: str = ""
+    challenge: str = ""
     redirect_escape: bool = False
     depth: int = 0
     elapsed_ms: int = 0

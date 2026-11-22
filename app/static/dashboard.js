@@ -5,6 +5,7 @@
   var img = document.getElementById("live-frame");
   var log = document.getElementById("live-log");
   var statusNode = document.getElementById("live-status");
+  var captionNode = document.getElementById("live-caption");
   var startedRunning = document.body.getAttribute("data-status") === "queued"
     || document.body.getAttribute("data-status") === "running";
 
@@ -14,11 +15,16 @@
       img.hidden = false;
       img.src = data.frame + "?t=" + Date.now();
     }
+    var rows = data.events || [];
+    if (captionNode && rows.length) {
+      captionNode.textContent = rows[rows.length - 1].caption || "Watching the page";
+    }
     if (log) {
       log.replaceChildren();
-      (data.events || []).forEach(function (row) {
+      rows.forEach(function (row, index) {
         var item = document.createElement("li");
         item.textContent = row.caption || row.kind || "";
+        if (index === rows.length - 1) item.className = "latest";
         log.appendChild(item);
       });
     }

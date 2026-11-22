@@ -8,7 +8,7 @@ import httpx
 
 from app.config import Settings
 from app.generation.llm import extract_json
-from app.mind.plan import FlowDecision
+from app.mind.plan import FlowDecision, _FOCUS, goal_allows_account
 from app.models import DiscoveredPage
 from app.security.text import redact
 
@@ -22,10 +22,12 @@ def enabled(settings: Settings) -> bool:
     return bool(settings.hf_token or settings.hf_local)
 
 
-async def advise(settings: Settings, pages: list[DiscoveredPage], memory: dict) -> tuple[dict | None, str]:
+async def advise(
+    settings: Settings, pages: list[DiscoveredPage], memory: dict, goal: str = ""
+) -> tuple[dict | None, str]:
     if not enabled(settings):
         return None, ""
-    prompt = _understand_prompt(pages, memory)
+    prompt = _understand_prompt(pages, memory, goal)
     try:
         raw, source = await _complete(settings, prompt)
         payload = extract_json(raw)
@@ -37,17 +39,33 @@ async def advise(settings: Settings, pages: list[DiscoveredPage], memory: dict) 
     return payload, source
 
 
-def apply_advice(decision: FlowDecision, payload: dict | None, memory: dict) -> FlowDecision:
+def apply_advice(decision: FlowDecision, payload: dict | None, memory: dict, goal: str = "") -> FlowDecision:
     """Keep the account rule. A remembered account is never signed up again."""
+    if isinstance(payload, dict):
+        account_ready = bool(memory.get("signup_done") and memory.get("username"))
+        summary = payload.get("summary") if isinstance(payload.get("summary"), str) else ""
+        summary = redact(summary, 400)
+        source = str(payload.get("_source") or "")
+        if _summary_ok(summary, str(memory.get("password") or "")):
+            decision.summary = summary
+            decision.mind = f"huggingface:{source}" if source else "huggingface"
+        focus = _focus_of(payload)
+        if focus:
+            decision.focus = focus
+    else:
+        account_ready = bool(memory.get("signup_done") and memory.get("username"))
+    if goal.strip() and not goal_allows_account(goal):
+        decision.create_account = False
+        decision.sign_in = False
+        if decision.mind == "built-in":
+            decision.summary = (
+                "The prompt does not ask for an account, so signup and sign-in stay closed. "
+                "Public screens are checked once. Quotes and payments are not submitted."
+            )
+        return decision
     if not isinstance(payload, dict):
         return decision
-    account = bool(memory.get("signup_done") and memory.get("username"))
-    summary = payload.get("summary") if isinstance(payload.get("summary"), str) else ""
-    summary = redact(summary, 400)
-    source = str(payload.get("_source") or "")
-    if _summary_ok(summary, str(memory.get("password") or "")):
-        decision.summary = summary
-        decision.mind = f"huggingface:{source}" if source else "huggingface"
+    account = account_ready
     if account or not decision.signup_url:
         decision.create_account = False
     elif decision.signup_url and not account:
@@ -103,7 +121,7 @@ async def _remote(settings: Settings, prompt: str) -> str:
     body = {
         "model": settings.hf_model,
         "temperature": 0,
-        "max_tokens": 180,
+        "max_tokens": 400,
         "messages": [
             {
                 "role": "system",
@@ -117,13 +135,16 @@ async def _remote(settings: Settings, prompt: str) -> str:
     }
     headers = {"Authorization": f"Bearer {settings.hf_token}"}
     async with httpx.AsyncClient(timeout=40.0) as client:
-        response = await client.post(f"{settings.hf_base_url}/chat/completions", json=body, headers=headers)
-        response.raise_for_status()
-        data = response.json()
-    content = data["choices"][0]["message"]["content"]
-    if not isinstance(content, str) or not content.strip():
-        raise ValueError("empty model output")
-    return content
+        last = "empty model output"
+        for _ in range(2):
+            response = await client.post(f"{settings.hf_base_url}/chat/completions", json=body, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            content = data["choices"][0]["message"].get("content")
+            if isinstance(content, str) and content.strip():
+                return content
+            last = "model returned no decision"
+        raise ValueError(last)
 
 
 def _local(model_name: str, prompt: str) -> str:
@@ -147,7 +168,7 @@ def _local(model_name: str, prompt: str) -> str:
     return tokenizer.decode(output[0][ids["input_ids"].shape[1] :], skip_special_tokens=True)
 
 
-def _understand_prompt(pages: list[DiscoveredPage], memory: dict) -> str:
+def _understand_prompt(pages: list[DiscoveredPage], memory: dict, goal: str) -> str:
     lines = []
     for page in pages[:12]:
         if page.redirect_escape:
@@ -155,14 +176,34 @@ def _understand_prompt(pages: list[DiscoveredPage], memory: dict) -> str:
         lines.append(f"- {page.url} | {page.title} | {page.primary_heading}")
     remembered = "yes" if memory.get("signup_done") and memory.get("username") else "no"
     username = memory.get("username") or ""
+    asked = redact(goal, 400).replace("\n", " ").strip() or "Exercise the app once."
     return (
-        "Decide the next test step. Reply JSON only with keys summary, create_account, sign_in. "
+        "Decide the next test step from the user's request. Reply JSON only with keys "
+        "summary, create_account, sign_in, focus. "
+        "create_account and sign_in are booleans. "
         "create_account is true only when a signup screen is listed and account_remembered is no. "
-        "sign_in is true only when account_remembered is yes. Do not repeat signup.\n"
+        "sign_in is true only when account_remembered is yes. Do not repeat signup. "
+        f"focus is a list drawn only from: {', '.join(sorted(_FOCUS))}. "
+        "Leave out screens the user did not ask for. "
+        "If the user request does not ask to sign up or sign in, create_account and sign_in are false.\n"
+        f"user_request: {asked}\n"
         f"account_remembered: {remembered}\n"
         f"username: {username}\n"
         "screens:\n" + "\n".join(lines)
     )
+
+
+def _focus_of(payload: dict) -> list[str]:
+    raw = payload.get("focus")
+    if isinstance(raw, str):
+        raw = [part.strip() for part in raw.replace(",", " ").split() if part.strip()]
+    if not isinstance(raw, list):
+        return []
+    chosen: list[str] = []
+    for item in raw:
+        if isinstance(item, str) and item in _FOCUS and item not in chosen:
+            chosen.append(item)
+    return chosen
 
 
 def _summary_ok(text: str, password: str) -> bool:

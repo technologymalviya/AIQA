@@ -186,7 +186,8 @@ async def _signup(page, url: str, origin: str, account: dict, settings: Settings
         error = await _form_error(page)
         if error:
             return StepResult(action="signup", passed=False, error=redact(error, 300), kind="assertion")
-        if await _shell(page) or await _has_session(page):
+        if await _shell(page) or await _has_session(page) or await _account_ready(page):
+            await _open_ready(page)
             return StepResult(action="signup", passed=True, actual=account["username"])
         heading = await _heading(page)
         detail = f"signup did not open the app ({heading})" if heading else "signup did not open the app"
@@ -398,7 +399,9 @@ async def _submit(page, timeout_ms: int) -> None:
               const err = document.querySelector('.auth-error');
               if (err && (err.innerText || '').trim()) return true;
               if (localStorage.getItem('milkman_token')) return true;
-              const buttons = [...document.querySelectorAll('button')];
+              const text = document.body ? document.body.innerText : '';
+              if (text.includes('Your dairy is ready') || text.includes('Account created')) return true;
+              const buttons = [...document.querySelectorAll('button, a')];
               return buttons.some((b) => (b.innerText || '').trim() === 'Customer');
             }""",
             timeout=min(timeout_ms, 8000),
@@ -422,6 +425,27 @@ async def _heading(page) -> str:
         return (await page.locator("h1").first.inner_text(timeout=1000)).strip()[:80]
     except PlaywrightError:
         return ""
+
+
+async def _account_ready(page) -> bool:
+    try:
+        text = (await page.locator("body").inner_text(timeout=1000)).lower()
+    except PlaywrightError:
+        return False
+    return "your dairy is ready" in text or "account created" in text
+
+
+async def _open_ready(page) -> None:
+    for role in ("button", "link"):
+        control = page.get_by_role(role, name="Open your dairy", exact=True)
+        try:
+            if await control.count() == 0:
+                continue
+            await control.first.click(timeout=3000)
+            await page.wait_for_timeout(600)
+            return
+        except PlaywrightError:
+            return
 
 
 async def _shell(page) -> bool:

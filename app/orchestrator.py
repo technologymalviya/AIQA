@@ -13,9 +13,10 @@ from app.discovery.crawler import crawl
 from app.execution.runner import execute_case, launch_browser
 from app.generation.design import design_suite
 from app.mind.advisor import advise, apply_advice, choose_nav
+from app.mind.hands import look_around
 from app.mind.journey import run_journey
 from app.mind.memory import load_memory, save_memory, scrub
-from app.mind.plan import decide
+from app.mind.plan import decide, pages_for_focus
 from app.models import CaseResult, CostLedger, TestCase, Verdict
 from app.reporting.writer import (
     measured_bytes,
@@ -74,14 +75,16 @@ async def _execute(store: RunStore, run_id: str, settings: Settings, llm_complet
         store.update(run_id, phase="design")
         memory = load_memory(settings.runs_dir, origin.origin)
         decision = decide(discovery.pages, memory)
-        payload, _source = await advise(settings, discovery.pages, memory)
-        decision = apply_advice(decision, payload, memory)
+        goal = request.get("requirements_text", "")
+        payload, _source = await advise(settings, discovery.pages, memory, goal)
+        decision = apply_advice(decision, payload, memory, goal)
         mind_note = decision.summary
         if decision.mind.startswith("huggingface"):
             used = decision.mind.split(":", 1)[-1]
             mind_note = f"Hugging Face {used}: {decision.summary}"
         store.event(run_id, "mind", {"note": redact(scrub(mind_note, memory), 300)})
-        focused = discovery.model_copy(update={"pages": decision.unique_pages or discovery.pages})
+        focused_pages = pages_for_focus(decision.unique_pages or discovery.pages, decision.focus)
+        focused = discovery.model_copy(update={"pages": focused_pages})
         generated = await design_suite(
             focused,
             mode=request["mode"],
@@ -127,6 +130,21 @@ async def _execute(store: RunStore, run_id: str, settings: Settings, llm_complet
         allowed = {page.url for page in discovery.pages if not page.redirect_escape}
         evidence_root = run_dir / "evidence"
         results: list[CaseResult] = list(journey_results)
+        if not store.cancelled(run_id) and time.monotonic() < started + settings.run_timeout_s:
+            looked = await look_around(
+                browser,
+                start_url=request["target_url"],
+                origin=origin.origin,
+                settings=settings,
+                environment=environment,
+                on_screen=publish,
+                on_note=_note,
+                cancel_check=lambda: store.cancelled(run_id),
+                choose=(lambda labels, checked: choose_nav(settings, labels, checked))
+                if settings.hf_token or settings.hf_local
+                else None,
+            )
+            results.extend(looked)
         deadline = started + settings.run_timeout_s
         for case in generated.cases:
             targets = {step.target for step in case.steps if step.action == "goto"}

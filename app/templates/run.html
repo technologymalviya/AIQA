@@ -20,11 +20,15 @@
     <p class="error">{{ run.error }}</p>
     {% endif %}
     <section class="card stage" data-live="1" data-run="{{ run.run_id }}">
-      <h2>What the browser is doing</h2>
-      <p>Target {{ run.request.target_url }}</p>
-      <p class="meta" id="live-status">{{ run.status }} · {{ run.phase }}</p>
-      <img id="live-frame" class="shot" alt="Page the tester is looking at" hidden>
-      <ol id="live-log"></ol>
+      <div class="browser">
+        <div class="browser-bar" id="live-caption">Waiting for the browser</div>
+        <img id="live-frame" class="shot" alt="Page the tester is looking at" hidden>
+        <p class="meta" id="live-status">{{ run.status }} · {{ run.phase }} · {{ run.request.target_url }}</p>
+      </div>
+      <div>
+        <h2>What I'm doing</h2>
+        <ol id="live-log"></ol>
+      </div>
       {% if run.status in ["queued", "running"] %}
       <form method="post" action="/api/v1/runs/{{ run.run_id }}/cancel">
         <button type="submit">Cancel</button>

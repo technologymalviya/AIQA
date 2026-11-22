@@ -67,6 +67,20 @@ def _goto(page: DiscoveredPage, timeout_ms: int) -> TestStep:
 def cases_for_page(page: DiscoveredPage, timeout_ms: int) -> list[TestCase]:
     if page.redirect_escape:
         return []
+    if page.challenge:
+        blocked = _base(
+            page,
+            kind="challenge",
+            title=f"{page.title or page.url} was blocked by the site",
+            summary=page.challenge,
+            steps=[],
+            priority="P2",
+            risk="medium",
+            tags=["blocked", "challenge"],
+        )
+        blocked.blocked_reason = page.challenge
+        blocked.automation_status = "manual"
+        return [blocked]
     timeout = max(100, min(timeout_ms, 30000))
     built: list[TestCase] = []
     status = page.http_status

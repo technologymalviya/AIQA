@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
@@ -16,7 +17,11 @@ class FlowDecision:
     create_account: bool = False
     sign_in: bool = False
     unique_pages: list[DiscoveredPage] = field(default_factory=list)
+    focus: list[str] = field(default_factory=list)
     mind: str = "built-in"
+
+
+_FOCUS = {"home", "signup", "signin", "privacy", "thanks", "other"}
 
 
 def screen_signature(page: DiscoveredPage) -> str:
@@ -44,6 +49,8 @@ def role_of(page: DiscoveredPage) -> str:
     path = urlsplit(page.url).path.lower()
     heading = (page.primary_heading or "").strip().lower()
     title = (page.title or "").strip().lower()
+    if path in {"", "/"}:
+        return "home"
     if "saas" in path:
         return "other"
     if "/signup" in path or path.endswith("/signup") or heading in {"create account", "sign up"}:
@@ -92,6 +99,35 @@ def decide(pages: list[DiscoveredPage], memory: dict) -> FlowDecision:
         sign_in=sign_in,
         unique_pages=unique,
     )
+
+
+_ACCOUNT_ASK = re.compile(
+    r"\b(sign[\s-]?up|create (?:an? |one )?account|register|sign[\s-]?in|log[\s-]?in)\b",
+    re.IGNORECASE,
+)
+_ACCOUNT_REFUSE = re.compile(
+    r"\b(?:do not|don't|never|without)\b(?:\W+\w+){0,8}\W+\b(?:sign[\s-]?up|account|register|quote|pay|purchase)\b",
+    re.IGNORECASE,
+)
+
+
+def goal_allows_account(goal: str) -> bool:
+    """An empty prompt keeps the older signup behavior. A prompt that does not ask does not."""
+    text = goal.strip()
+    if not text:
+        return True
+    if _ACCOUNT_REFUSE.search(text):
+        return False
+    return bool(_ACCOUNT_ASK.search(text))
+
+
+def pages_for_focus(pages: list[DiscoveredPage], focus: list[str]) -> list[DiscoveredPage]:
+    """Keep the screens the model named. Unknown names are ignored."""
+    allowed = [item for item in focus if item in _FOCUS]
+    if not allowed:
+        return pages
+    chosen = [page for page in pages if role_of(page) in set(allowed)]
+    return chosen or pages
 
 
 def _shorter(candidate: DiscoveredPage, current: DiscoveredPage) -> bool:

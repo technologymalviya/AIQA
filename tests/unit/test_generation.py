@@ -3,7 +3,9 @@ import json
 from pathlib import Path
 
 from app.config import Settings
+from app.discovery.challenge import challenge_reason
 from app.generation.design import design_suite
+from app.generation.heuristic import cases_for_page
 from app.generation.llm import LLMCompletion
 from app.models import DiscoveredPage, Discovery, Provenance
 from app.reporting.writer import write_cases, write_cost
@@ -128,6 +130,22 @@ def test_missing_key_uses_heuristic(tmp_path: Path):
     assert result.provenance is Provenance.HEURISTIC
     assert "no LLM API key" in result.fallback_reason
     assert any("mode is auto" in question for question in result.open_questions)
+
+
+def test_a_browser_check_is_not_treated_as_the_product():
+    reason = challenge_reason("Access Denied", "", "Pardon Our Interruption")
+    assert "browser check" in reason
+    page = DiscoveredPage(
+        url="https://insurer.example:443/",
+        title="Access Denied",
+        http_status=200,
+        challenge=reason,
+    )
+    cases = cases_for_page(page, 2000)
+    assert len(cases) == 1
+    assert cases[0].blocked_reason == reason
+    assert cases[0].steps == []
+    assert challenge_reason("Lemonade", "Insurance made easy", "Get a quote") == ""
 
 
 def test_cost_ledger_does_not_invent_prices(tmp_path: Path):

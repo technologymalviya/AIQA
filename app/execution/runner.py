@@ -21,7 +21,7 @@ from app.execution.screen import capture
 from app.execution.verdict import judge, should_retain_media
 from app.models import CaseResult, Provenance, StepResult, TestCase
 from app.security.paths import require_case_id, safe_child
-from app.security.text import normalize_label, redact
+from app.security.text import noise_console, normalize_label, redact
 from app.security.url_policy import Origin, ScopeError, check_target, path_is_destructive
 
 
@@ -87,7 +87,7 @@ async def execute_case(
         state: dict = {"http_status": None, "console_errors": [], "page_errors": []}
 
         def on_console(msg) -> None:
-            if getattr(msg, "type", "") == "error":
+            if getattr(msg, "type", "") == "error" and not noise_console(msg.text):
                 state["console_errors"].append(redact(msg.text, 300))
 
         def on_pageerror(exc) -> None:

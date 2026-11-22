@@ -13,10 +13,11 @@ from urllib.parse import urljoin
 from playwright.async_api import Browser, Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
+from app.discovery.challenge import challenge_reason
 from app.discovery.routes import routes_from_script
 from app.execution.screen import capture
 from app.models import Discovery, DiscoveredPage, FormField, FormMeta, LinkInfo
-from app.security.text import normalize_label, redact
+from app.security.text import noise_console, normalize_label, redact
 from app.security.url_policy import (
     Origin,
     ScopeError,
@@ -60,6 +61,22 @@ _EXTRACT_JS = """
   const declaredBug = bug ? (bug.getAttribute("data-qa-bug") || "").slice(0, 200) : "";
   const scripts = [...document.querySelectorAll("script[src]")].slice(0, 20).map((s) => s.src || "");
   return { headings, primaryHeading, links, buttons, forms, appVersion, declaredBug, scripts };
+}
+"""
+
+
+_CONSENT_JS = """
+() => {
+  const labels = ["reject all", "decline all", "only essential cookies", "accept all", "allow all", "accept cookies", "i agree", "got it"];
+  const nodes = [...document.querySelectorAll("button, [role='button']")];
+  for (const wanted of labels) {
+    const match = nodes.find((node) => ((node.innerText || node.getAttribute("aria-label") || "").trim().toLowerCase()) === wanted);
+    if (match) {
+      match.click();
+      return wanted;
+    }
+  }
+  return "";
 }
 """
 
@@ -175,7 +192,7 @@ async def _visit(
     page_errors: list[str] = []
 
     def on_console(msg: Any) -> None:
-        if getattr(msg, "type", "") == "error":
+        if getattr(msg, "type", "") == "error" and not noise_console(msg.text):
             console_errors.append(redact(msg.text, 300))
 
     def on_pageerror(exc: Any) -> None:
@@ -208,6 +225,10 @@ async def _visit(
             record.elapsed_ms = int((time.monotonic() - started) * 1000)
             return record
         try:
+            await page.evaluate(_CONSENT_JS)
+        except PlaywrightError:
+            pass
+        try:
             await page.wait_for_function(
                 "() => (document.body && (document.body.innerText || '')).trim().length > 20",
                 timeout=min(timeout_ms, 4000),
@@ -234,6 +255,7 @@ async def _visit(
         except PlaywrightError:
             excerpt = ""
         record.text_excerpt = redact(excerpt, 1200)
+        record.challenge = challenge_reason(record.title, record.primary_heading, record.text_excerpt)
         record.buttons = [normalize_label(item, 120) for item in (raw.get("buttons") or []) if normalize_label(item, 120)]
         record.forms = _scrub_forms(raw.get("forms") or [])
         record.links = _links(url, origin, raw.get("links") or [])

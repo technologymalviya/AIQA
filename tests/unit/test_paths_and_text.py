@@ -2,9 +2,10 @@ from pathlib import Path
 
 import pytest
 
+from app.mind.hands import hands_off
 from app.models import Provenance
 from app.security.paths import PathSafetyError, require_case_id, safe_child
-from app.security.text import markdown_text, redact
+from app.security.text import markdown_text, noise_console, redact
 
 
 def test_case_id_and_path_escape():
@@ -28,6 +29,16 @@ def test_redaction_and_encoding():
     assert "<script>" not in encoded
     assert "\x00" not in encoded
     assert "\u202e" not in encoded
+
+
+def test_hands_skip_quotes_and_ignore_missing_images():
+    assert hands_off("Get a quote")
+    assert hands_off("Sign in")
+    assert hands_off("Skip to main content")
+    assert not hands_off("Renters")
+    assert noise_console("Failed to load resource: the server responded with a status of 404 ()")
+    assert noise_console("Permissions policy violation: unload is not allowed in this document.")
+    assert not noise_console("Uncaught TypeError: cannot read properties of null")
 
 
 def test_provenance_values():

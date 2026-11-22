@@ -38,6 +38,14 @@ def redact(value: object, limit: int = 2000) -> str:
     return _SECRET.sub("[redacted]", sanitize_text(value, limit))
 
 
+def noise_console(value: object) -> bool:
+    """A missing image or font is not a product failure."""
+    text = sanitize_text(value, 300).lower()
+    if "permissions policy violation" in text:
+        return True
+    return "failed to load resource" in text and any(code in text for code in ("404", "403"))
+
+
 def markdown_text(value: object, limit: int = 2000) -> str:
     """Neutralise HTML in Markdown that a browser might later render."""
     text = redact(value, limit)
