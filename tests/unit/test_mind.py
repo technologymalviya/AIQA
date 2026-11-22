@@ -1,6 +1,18 @@
 from app.mind.advisor import apply_advice
 from app.mind.memory import scrub
-from app.mind.journey import admin_sections
+from app.mind.follow import (
+    credentials_for,
+    credentials_from_text,
+    first_role,
+    grounded_action,
+    login_from_fields,
+    named_roles,
+    off_order,
+    open_work,
+    order_for_goal,
+    plan_fields,
+    too_early,
+)
 from app.mind.plan import decide, goal_allows_account, goal_wants_fresh_account, pages_for_focus, role_of, unique_pages
 from app.models import DiscoveredPage
 
@@ -133,20 +145,63 @@ def test_memory_summary_hides_the_password():
     assert secret not in scrub(f"failed with {secret}", {"password": secret})
 
 
-def test_admin_flow_opens_the_owner_desk_and_skips_tickets():
-    labels = admin_sections(
-        [
-            "Customer",
-            "Delivery Boy",
-            "Milk Buy",
-            "Raise Ticket",
-            "Settings",
-            "Notification",
-            "Logout",
-            "Upgrade to Active",
-            "Change Password",
-            "Copy login details",
-            "Add a customer",
-        ]
+def test_a_request_is_followed_one_grounded_step_at_a_time():
+    goal = (
+        "check delivery boy flow after sign in as delivery boy. "
+        "For that you need to login first as admin and create the delivery boy"
     )
-    assert labels == ["Customer", "Delivery Boy", "Milk Buy", "Settings", "Notification"]
+    assert first_role(goal) == "admin"
+    assert first_role("check admin flow after login") == ""
+    buttons = ["Delivery Boy", "Add delivery boy", "Logout", "Upgrade to Active"]
+    assert grounded_action({"do": "click", "target": "Logout"}, buttons=buttons, fields=[], goal=goal) is None
+    assert grounded_action({"do": "click", "target": "Add delivery boy"}, buttons=buttons, fields=[], goal=goal) == {
+        "do": "click",
+        "target": "Add delivery boy",
+    }
+    assert grounded_action({"do": "click", "target": "Not on screen"}, buttons=buttons, fields=[], goal=goal) is None
+    assert grounded_action({"do": "fill", "target": ""}, buttons=buttons, fields=[], goal=goal) is None
+    assert grounded_action(
+        {"do": "sign_in", "target": "Delivery Boy"}, buttons=buttons, fields=["Name"], goal=goal
+    ) == {"do": "sign_in", "target": "Delivery Boy"}
+    assert grounded_action({"do": "sign_in", "target": "Settings"}, buttons=buttons, fields=[], goal=goal) is None
+    planned = plan_fields(["Name", "Mobile", "Aadhar number", "Password"])
+    assert planned["Name"] == "QA Route"
+    assert planned["Aadhar number"] == ""
+    assert len(planned["Mobile"]) == 10
+    saved = login_from_fields(planned)
+    assert saved is not None
+    assert saved["username"] == planned["Mobile"]
+    assert saved["password"] == planned["Password"]
+    assert credentials_for({"username": "owner", "password": "owner-secret", "created_logins": [saved]}, "Admin")[
+        "username"
+    ] == "owner"
+    assert credentials_for({"username": "owner", "password": "owner-secret", "created_logins": [saved]}, "Delivery Boy")[
+        "username"
+    ] == planned["Mobile"]
+    ordered = order_for_goal(
+        ["Customer", "Milk Buy", "Add a customer", "Add a delivery boy", "Settings"],
+        goal,
+    )
+    assert ordered[0] == "Add a delivery boy"
+    ordered_request = "create the delivery boy and copy the credential"
+    assert too_early("Copy login details", ordered_request, []) is True
+    assert too_early("Copy login details", ordered_request, ["filled the open form"]) is False
+    assert named_roles(goal)[0] == "admin"
+    started = ["signed in as admin"]
+    assert open_work(goal, started).startswith("create ")
+    created = [*started, "filled the open form"]
+    assert open_work(goal, created) == "sign in as delivery boy"
+    copying = goal + " and copy the credential from there"
+    assert open_work(copying, created).startswith("copy the credential")
+    assert open_work(copying, [*created, "copied the credential"]) == "sign in as delivery boy"
+    shown = "On the login page, choose Role: Delivery Boy, then enter:\n  • Username: route1\n  • Password: (not set)\n  • Password: kept-secret"
+    parsed = credentials_from_text(shown)
+    assert parsed == {"username": "route1", "password": "kept-secret"}
+    ordered_copy = order_for_goal(["Customer", "Active", "Copy", "Edit"], copying, "do what the page says: Click Active in the list, then copy")
+    assert ordered_copy[0] == "Active"
+    assert off_order({"do": "click", "target": "Copy login details"}, open_work(goal, created)) is True
+    assert off_order({"do": "click", "target": "Customer"}, "fill the open form") is True
+    assert off_order({"do": "sign_in", "target": "admin"}, "open a screen for the signed-in role") is True
+    signed_in = [*created, "signed in as delivery boy"]
+    assert open_work(goal, signed_in).startswith("open a screen")
+    assert open_work(goal, [*signed_in, "opened Today"]) == "the request is complete"

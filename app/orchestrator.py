@@ -16,7 +16,7 @@ from app.mind.advisor import advise, apply_advice, choose_nav
 from app.mind.hands import look_around
 from app.mind.journey import run_journey
 from app.mind.memory import load_memory, save_memory, scrub
-from app.mind.plan import decide, pages_for_focus
+from app.mind.plan import decide, goal_allows_account, pages_for_focus
 from app.models import CaseResult, CostLedger, TestCase, Verdict
 from app.reporting.writer import (
     measured_bytes,
@@ -131,12 +131,10 @@ async def _execute(store: RunStore, run_id: str, settings: Settings, llm_complet
         allowed = {page.url for page in discovery.pages if not page.redirect_escape}
         evidence_root = run_dir / "evidence"
         results: list[CaseResult] = list(journey_results)
-        admin_signed_in = "admin" in request.get("requirements_text", "").lower() and any(
-            result.verdict == Verdict.PASS and result.title == "Use one remembered account"
-            for result in journey_results
-        )
+        asked = request.get("requirements_text", "").strip()
+        followed_request = bool(asked) and goal_allows_account(asked)
         if (
-            not admin_signed_in
+            not followed_request
             and not store.cancelled(run_id)
             and time.monotonic() < started + settings.run_timeout_s
         ):
