@@ -16,6 +16,8 @@ _SYSTEM = (
     "or excerpts. Use only the actions goto, assert_http_status, assert_title, "
     "assert_heading, assert_text, and assert_no_page_errors. Every goto URL must be "
     "copied from the discovered URL list. assert_http_status expected is the string 2xx. "
+    "Cover every discovered URL. Do not invent a URL, and do not plan login, purchase, "
+    "delete, or message-sending steps. "
     "Do not emit JavaScript, shell, file paths, or URLs outside that list. "
     'Return {"cases":[{"title":"","summary":"","steps":[{"action":"goto","target":"","expected":""}]}]}. '
     "Do not include a verdict."
@@ -107,7 +109,7 @@ async def complete_json(settings: Settings, user_payload: str) -> LLMCompletion:
     }
     headers = {"Authorization": f"Bearer {settings.llm_api_key}"}
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=45.0) as client:
             response = await client.post(
                 f"{settings.llm_base_url}/chat/completions",
                 json=body,
@@ -146,14 +148,14 @@ async def complete_json(settings: Settings, user_payload: str) -> LLMCompletion:
 def prompt_for(pages: list, requirements: list) -> str:
     """Build the user message. It is data, and it is redacted again here."""
     brief = []
-    for page in pages[:10]:
+    for page in pages[:60]:
         brief.append(
             {
                 "url": page.url,
                 "http_status": page.http_status,
                 "title": page.title,
-                "headings": page.headings[:8],
-                "excerpt": redact(page.text_excerpt, 500),
+                "headings": page.headings[:6],
+                "excerpt": redact(page.text_excerpt, 240),
                 "console_errors": page.console_errors[:5],
                 "page_errors": page.page_errors[:5],
             }

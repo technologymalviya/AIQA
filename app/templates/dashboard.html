@@ -20,22 +20,17 @@
     <p class="error">{{ error }}</p>
     {% endif %}
     <form class="card" method="post" action="/runs">
-      <h2>New run</h2>
-      <label for="target_url">Target URL</label>
-      <input id="target_url" name="target_url" type="url" required value="http://127.0.0.1:8000/demo/" maxlength="2000">
-      <div class="row">
-        <label><input type="radio" name="mode" value="auto" checked> Auto</label>
-        <label><input type="radio" name="mode" value="hybrid"> Hybrid</label>
-      </div>
-      <label for="requirements_text">Requirements (hybrid)</label>
-      <textarea id="requirements_text" name="requirements_text" maxlength="20000" placeholder="REQ-1: The Help Centre page explains shipping."></textarea>
-      <label for="max_pages">Max pages</label>
-      <input id="max_pages" name="max_pages" type="number" min="1" max="25" value="8">
+      <h2>Test an app</h2>
+      <p class="meta">Paste the address and, if you want, what to check. Auto opens every public screen on that site and shows the browser while it works. A prompt is included when you write one. ChatGPT plans the checks when this server has <code>QA_LLM_API_KEY</code>. Otherwise the built-in page checks run.</p>
+      <label for="target_url">App URL</label>
+      <input id="target_url" name="target_url" type="url" required placeholder="https://dairyhisab.in/" maxlength="2000">
+      <label for="requirements_text">Prompt</label>
+      <textarea id="requirements_text" name="requirements_text" maxlength="20000" placeholder="Check the public screens, including sign-in, signup, and privacy. Do not log in."></textarea>
       <label>
         <input type="checkbox" name="authorization_confirmed" value="true" required>
-        I am authorized to test this environment. Discovery stays read-only and on this origin.
+        I confirm authorization to test this site. The run stays on this site, does not log in, and does not submit forms.
       </label>
-      <p><button type="submit">Start run</button></p>
+      <p><button type="submit">Start testing</button></p>
     </form>
     <section class="card">
       <h2>Recent runs</h2>

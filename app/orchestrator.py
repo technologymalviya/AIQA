@@ -25,6 +25,7 @@ from app.reporting.writer import (
     write_traceability,
     write_understanding,
 )
+from app.security.paths import safe_child
 from app.security.text import redact
 from app.security.url_policy import origin_of
 from app.storage.runs import RunStore
@@ -53,6 +54,8 @@ async def _execute(store: RunStore, run_id: str, settings: Settings, llm_complet
         )
         store.update(run_id, phase="explore")
         manager, browser = await launch_browser(settings)
+        run_dir = store.directory(run_id)
+        publish = _frame_publisher(store, run_id, run_dir)
         discovery = await crawl(
             browser,
             request["target_url"],
@@ -60,8 +63,8 @@ async def _execute(store: RunStore, run_id: str, settings: Settings, llm_complet
             max_depth=int(request["max_depth"]),
             navigation_timeout_ms=settings.navigation_timeout_ms,
             cancel_check=lambda: store.cancelled(run_id),
+            on_screen=publish,
         )
-        run_dir = store.directory(run_id)
         write_discovery(run_dir, discovery)
         store.event(run_id, "tool", {"name": "crawl", "pages": len(discovery.pages)})
         store.update(run_id, phase="design")
@@ -72,11 +75,23 @@ async def _execute(store: RunStore, run_id: str, settings: Settings, llm_complet
             settings=settings,
             llm_complete=llm_complete,
         )
+        generated.open_questions.extend(discovery.coverage_notes)
+        generated.open_questions.append(
+            "Signed-in screens stay closed. This run does not log in, submit a form, or send a message."
+        )
         for page in discovery.pages:
             if page.redirect_escape:
                 generated.open_questions.append(
                     f"{page.url} redirected outside the authorized origin. Body text was discarded."
                 )
+        planner = generated.fallback_reason or (
+            f"{generated.model or settings.llm_model} planned {len(generated.cases)} checks"
+        )
+        store.event(
+            run_id,
+            "design",
+            {"provenance": generated.provenance.value, "cases": len(generated.cases), "note": planner[:300]},
+        )
         environment = _environment(settings, request["target_url"], discovery)
         store.update(run_id, phase="execute")
         allowed = {page.url for page in discovery.pages if not page.redirect_escape}
@@ -98,6 +113,7 @@ async def _execute(store: RunStore, run_id: str, settings: Settings, llm_complet
                 evidence_root=evidence_root,
                 settings=settings,
                 environment=environment,
+                on_screen=publish,
             )
             results.append(outcome)
             store.event(
@@ -128,6 +144,22 @@ async def _execute(store: RunStore, run_id: str, settings: Settings, llm_complet
             await browser.close()
         if manager is not None:
             await manager.stop()
+
+
+def _frame_publisher(store: RunStore, run_id: str, run_dir):
+    """Overwrite one live frame so the run page can show the browser."""
+
+    def publish(data: bytes, caption: str) -> None:
+        if not data.startswith(b"\x89PNG") or len(data) > 2_000_000:
+            return
+        dest = safe_child(run_dir, "live", "frame.png")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        temporary = safe_child(run_dir, "live", "frame.png.tmp")
+        temporary.write_bytes(data)
+        temporary.replace(dest)
+        store.event(run_id, "screen", {"caption": redact(caption, 180)})
+
+    return publish
 
 
 def _stopped(case: TestCase, reason: str, environment: dict[str, str]) -> CaseResult:

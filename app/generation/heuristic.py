@@ -78,8 +78,9 @@ def cases_for_page(page: DiscoveredPage, timeout_ms: int) -> list[TestCase]:
         ]
         if page.title:
             steps.append(TestStep(action="assert_title", expected=page.title, timeout_ms=timeout))
-        if page.headings:
-            steps.append(TestStep(action="assert_heading", expected=page.headings[0], timeout_ms=timeout))
+        # The executor reads the first h1. An earlier h2 must not become the expected text.
+        if page.primary_heading:
+            steps.append(TestStep(action="assert_heading", expected=page.primary_heading, timeout_ms=timeout))
         built.append(
             _base(
                 page,

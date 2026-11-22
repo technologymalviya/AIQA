@@ -50,7 +50,7 @@ class RunRequest(BaseModel):
     target_url: str = Field(min_length=1, max_length=2000)
     mode: Literal["auto", "hybrid"]
     requirements_text: str = Field(default="", max_length=20000)
-    max_pages: int = Field(default=8, ge=1, le=25)
+    max_pages: int = Field(default=8, ge=1, le=80)
     max_depth: int = Field(default=2, ge=0, le=4)
     authorization_confirmed: bool
 
@@ -149,6 +149,7 @@ class DiscoveredPage(BaseModel):
     title: str = ""
     app_version: str = ""
     headings: list[str] = Field(default_factory=list)
+    primary_heading: str = ""
     text_excerpt: str = ""
     links: list[LinkInfo] = Field(default_factory=list)
     buttons: list[str] = Field(default_factory=list)
@@ -168,6 +169,7 @@ class Discovery(BaseModel):
     pages: list[DiscoveredPage] = Field(default_factory=list)
     external_links: list[str] = Field(default_factory=list)
     denylisted: list[str] = Field(default_factory=list)
+    coverage_notes: list[str] = Field(default_factory=list)
     stopped_reason: str = ""
 
 

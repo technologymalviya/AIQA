@@ -224,6 +224,40 @@ def test_redirect_escape_does_not_keep_off_origin_body(pilot):
     assert all(not page["url"].startswith("https://example.com") for page in discovery["pages"])
 
 
+def test_dashboard_form_starts_a_visible_run(pilot):
+    base = pilot["base"]
+    with httpx.Client(timeout=30, follow_redirects=False) as client:
+        page = client.get(f"{base}/")
+        assert "Start testing" in page.text
+        assert "QA_LLM_API_KEY" in page.text
+        response = client.post(
+            f"{base}/runs",
+            data={
+                "target_url": f"{base}/demo/",
+                "requirements_text": "REQ-1: The Help Centre page explains how to contact support.",
+                "authorization_confirmed": "true",
+            },
+        )
+        assert response.status_code == 303, response.text
+        run_id = response.headers["location"].rstrip("/").rsplit("/", 1)[-1]
+        summary = _wait(client, base, run_id)
+    assert summary["status"] == "completed", summary
+    assert summary["request"]["mode"] == "hybrid"
+    assert summary["request"]["max_pages"] >= 25
+    frame = pilot["runs"] / run_id / "live" / "frame.png"
+    assert frame.is_file() and frame.read_bytes().startswith(b"\x89PNG")
+    with httpx.Client(timeout=10) as client:
+        activity = client.get(f"{base}/api/v1/runs/{run_id}/activity")
+        assert activity.status_code == 200
+        body = activity.json()
+        assert body["frame"].endswith("frame.png")
+        assert any(item["kind"] == "screen" for item in body["events"])
+        image = client.get(base + body["frame"])
+        assert image.status_code == 200
+        assert image.headers["cache-control"] == "no-store"
+        assert image.content.startswith(b"\x89PNG")
+
+
 def _assert_media(run_dir: Path, results: list[dict]) -> None:
     for item in results:
         evidence = run_dir / "evidence" / item["test_case_id"]

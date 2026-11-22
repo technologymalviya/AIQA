@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/static/dashboard.css">
   <link rel="icon" href="data:,">
 </head>
-<body data-poll="1" data-status="{{ run.status }}">
+<body data-status="{{ run.status }}">
   <header class="top">
     <div>
       <h1>Run {{ run.run_id }}</h1>
@@ -19,13 +19,17 @@
     {% if run.error %}
     <p class="error">{{ run.error }}</p>
     {% endif %}
-    <section class="card">
+    <section class="card stage" data-live="1" data-run="{{ run.run_id }}">
+      <h2>What the browser is doing</h2>
       <p>Target {{ run.request.target_url }}</p>
+      <p class="meta" id="live-status">{{ run.status }} · {{ run.phase }}</p>
+      <img id="live-frame" class="shot" alt="Page the tester is looking at" hidden>
+      <ol id="live-log"></ol>
       {% if run.status in ["queued", "running"] %}
       <form method="post" action="/api/v1/runs/{{ run.run_id }}/cancel">
         <button type="submit">Cancel</button>
       </form>
-      <p class="meta">This page reloads until the run finishes. A refresh does not drop the result.</p>
+      <p class="meta">This picture updates while the run is in progress. A refresh does not drop the result.</p>
       {% endif %}
     </section>
     {% if pages %}

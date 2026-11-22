@@ -17,6 +17,7 @@ from playwright.async_api import async_playwright
 
 from app.config import Settings
 from app.execution.policy import PolicyError, gate
+from app.execution.screen import capture
 from app.execution.verdict import judge, should_retain_media
 from app.models import CaseResult, Provenance, StepResult, TestCase
 from app.security.paths import require_case_id, safe_child
@@ -46,6 +47,7 @@ async def execute_case(
     evidence_root: Path,
     settings: Settings,
     environment: dict[str, str],
+    on_screen=None,
 ) -> CaseResult:
     started = time.monotonic()
     result = CaseResult(
@@ -93,6 +95,7 @@ async def execute_case(
 
         page.on("console", on_console)
         page.on("pageerror", on_pageerror)
+        await capture(page, on_screen, f"Running {case.title}")
         steps: list[StepResult] = []
         runner_error = ""
         policy_block = ""
@@ -154,6 +157,8 @@ async def execute_case(
                 break
             outcome.duration_ms = int((time.monotonic() - step_started) * 1000)
             steps.append(outcome)
+            mark = "passed" if outcome.passed else "failed"
+            await capture(page, on_screen, f"{case.title}: {step.action} {mark}")
             if not outcome.passed:
                 break
         verdict, classification, kind, reason = judge(

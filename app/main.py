@@ -108,12 +108,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def start_from_form(request: Request):
         form = await request.form()
         confirmed = form.get("authorization_confirmed") == "true"
+        text = str(form.get("requirements_text") or "")
+        raw_mode = str(form.get("mode") or "").strip().lower()
+        if raw_mode not in {"auto", "hybrid"}:
+            raw_mode = "hybrid" if text.strip() else "auto"
+        raw_pages = str(form.get("max_pages") or "").strip()
+        raw_depth = str(form.get("max_depth") or "").strip()
         try:
             payload = RunRequest(
                 target_url=str(form.get("target_url") or ""),
-                mode=str(form.get("mode") or "auto"),
-                requirements_text=str(form.get("requirements_text") or ""),
-                max_pages=int(form.get("max_pages") or 8),
+                mode=raw_mode,  # type: ignore[arg-type]
+                requirements_text=text,
+                max_pages=int(raw_pages) if raw_pages else app.state.settings.max_pages_cap,
+                max_depth=int(raw_depth) if raw_depth else 3,
                 authorization_confirmed=confirmed,
             )
         except (ValidationError, ValueError) as exc:
@@ -218,6 +225,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except (FileNotFoundError, ValueError):
             return _error(404, "not_found", "Results are not ready")
         return JSONResponse(json.loads(path.read_text(encoding="utf-8")))
+
+    @app.get("/api/v1/runs/{run_id}/activity")
+    def activity(run_id: str):
+        try:
+            run = app.state.store.load(run_id)
+        except (FileNotFoundError, ValueError):
+            return _error(404, "not_found", "Run not found")
+        rows = []
+        for row in app.state.store.events(run_id)[-80:]:
+            rows.append(
+                {
+                    "ts": row.get("ts", ""),
+                    "kind": row.get("kind", ""),
+                    "caption": _activity_caption(row),
+                }
+            )
+        frame = ""
+        try:
+            path = safe_child(app.state.store.directory(run_id), "live", "frame.png")
+        except (ValueError, FileNotFoundError):
+            path = None
+        if path is not None and path.is_file():
+            frame = f"/api/v1/runs/{run_id}/live/frame.png"
+        return {
+            "status": run["status"],
+            "phase": run["phase"],
+            "error": run.get("error", ""),
+            "summary": run.get("summary") or {},
+            "events": rows,
+            "frame": frame,
+        }
+
+    @app.get("/api/v1/runs/{run_id}/live/frame.png")
+    def live_frame(run_id: str):
+        try:
+            path = safe_child(app.state.store.directory(run_id), "live", "frame.png")
+        except (ValueError, FileNotFoundError):
+            return _error(404, "not_found", "Live frame is not available")
+        if not path.is_file():
+            return _error(404, "not_found", "Live frame is not available")
+        return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-store"})
 
     @app.get("/api/v1/runs/{run_id}/events")
     async def events(run_id: str):
@@ -341,6 +389,28 @@ def _optional_json(store: RunStore, run_id: str) -> tuple[list, list]:
     except (FileNotFoundError, ValueError, json.JSONDecodeError):
         results = []
     return pages, results
+
+
+def _activity_caption(row: dict) -> str:
+    detail = row.get("detail") if isinstance(row.get("detail"), dict) else {}
+    kind = str(row.get("kind") or "")
+    if detail.get("caption"):
+        return str(detail["caption"])[:180]
+    if kind == "scope":
+        return f"Staying on {detail.get('origin', '')}. Read-only, this site only."
+    if kind == "tool":
+        return f"Finished opening screens ({detail.get('pages', 0)})"
+    if kind == "design":
+        return str(detail.get("note") or "Planned the checks")[:180]
+    if kind == "verdict":
+        return f"{detail.get('verdict', '')} {detail.get('test_case_id', '')}".strip()
+    if kind == "completed":
+        return "Run finished"
+    if kind == "failed":
+        return "Run failed"
+    if kind == "run_start":
+        return "Run accepted"
+    return kind
 
 
 def _safe_error(exc: Exception) -> str:
