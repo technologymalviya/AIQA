@@ -10,7 +10,8 @@ from importlib.metadata import version
 from app import __version__
 from app.config import Settings
 from app.discovery.crawler import crawl
-from app.execution.runner import execute_case, launch_browser
+from app.execution.agent import run_generated_cases
+from app.execution.runner import launch_browser
 from app.generation.design import design_suite
 from app.mind.advisor import advise, apply_advice, choose_nav
 from app.mind.follow import session_seconds
@@ -18,7 +19,7 @@ from app.mind.hands import look_around
 from app.mind.journey import run_journey
 from app.mind.memory import load_memory, save_memory, scrub
 from app.mind.plan import decide, goal_allows_account, pages_for_focus
-from app.models import CaseResult, CostLedger, TestCase, Verdict
+from app.models import CaseResult, CostLedger, Verdict
 from app.reporting.writer import (
     measured_bytes,
     write_cases,
@@ -114,7 +115,7 @@ async def _execute(store: RunStore, run_id: str, settings: Settings, llm_complet
         def _note(message: str) -> None:
             store.event(run_id, "mind", {"note": redact(scrub(message, memory), 180)})
 
-        journey_results, handled, memory = await run_journey(
+        journey_results, _handled, memory = await run_journey(
             browser,
             decision=decision,
             memory=memory,
@@ -155,28 +156,19 @@ async def _execute(store: RunStore, run_id: str, settings: Settings, llm_complet
             )
             results.extend(looked)
         deadline = started + session_seconds(request.get("requirements_text", ""), settings.run_timeout_s)
-        for case in generated.cases:
-            targets = {step.target for step in case.steps if step.action == "goto"}
-            if targets and targets <= handled:
-                continue
-            if store.cancelled(run_id):
-                results.append(_stopped(case, "cancelled before execution", environment))
-                continue
-            if time.monotonic() > deadline:
-                results.append(_stopped(case, "run budget exhausted before execution", environment))
-                continue
-            outcome = await execute_case(
-                browser,
-                case,
-                origin=origin,
-                allowed_urls=allowed,
-                evidence_root=evidence_root,
-                settings=settings,
-                environment=environment,
-                on_screen=publish,
-            )
-            results.append(outcome)
-            store.event(
+        ran = await run_generated_cases(
+            browser,
+            generated.cases,
+            origin=origin,
+            allowed_urls=allowed,
+            evidence_root=evidence_root,
+            settings=settings,
+            environment=environment,
+            deadline=deadline,
+            cancelled=lambda: store.cancelled(run_id),
+            on_screen=publish,
+            on_note=_note,
+            on_verdict=lambda outcome: store.event(
                 run_id,
                 "verdict",
                 {
@@ -184,7 +176,9 @@ async def _execute(store: RunStore, run_id: str, settings: Settings, llm_complet
                     "verdict": outcome.verdict.value,
                     "classification": outcome.classification.value,
                 },
-            )
+            ),
+        )
+        results.extend(ran)
         store.update(run_id, phase="report")
         _publish(run_dir, discovery, generated, results, environment, request["mode"], started)
         counts = {verdict.value: sum(1 for item in results if item.verdict == verdict) for verdict in Verdict}
@@ -220,23 +214,6 @@ def _frame_publisher(store: RunStore, run_id: str, run_dir):
         store.event(run_id, "screen", {"caption": redact(caption, 180)})
 
     return publish
-
-
-def _stopped(case: TestCase, reason: str, environment: dict[str, str]) -> CaseResult:
-    stopped = case.model_copy(update={"blocked_reason": reason})
-    from app.execution.verdict import judge
-
-    verdict, classification, kind, text = judge([], blocked_reason=reason)
-    return CaseResult(
-        test_case_id=stopped.test_case_id,
-        title=stopped.title,
-        provenance=stopped.provenance,
-        verdict=verdict,
-        classification=classification,
-        failure_kind=kind,
-        reason=text,
-        environment=environment,
-    )
 
 
 def _environment(settings: Settings, target: str, discovery) -> dict[str, str]:
